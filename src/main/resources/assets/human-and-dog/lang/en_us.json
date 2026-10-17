@@ -1,0 +1,27 @@
+{
+	"key.categories.human-and-dog": "Human and Dog",
+	"key.human-and-dog.dog_camera": "Toggle dog's low camera",
+
+	"human-and-dog.screen.role.title": "Choose your role",
+	"human-and-dog.screen.role.hint": "One human, one dog. Everyone else watches.",
+	"human-and-dog.button.human": "Be the human",
+	"human-and-dog.button.dog": "Be the dog",
+	"human-and-dog.button.spectator": "Spectator",
+
+	"human-and-dog.screen.waiting.title": "Waiting for other players…",
+	"human-and-dog.screen.countdown.title": "Respawning…",
+	"human-and-dog.screen.variant.title": "Choose your dog variant",
+
+	"human-and-dog.variant.woods": "Woods wolf",
+	"human-and-dog.variant.pale": "Pale wolf",
+	"human-and-dog.variant.spotted": "Spotted wolf",
+	"human-and-dog.variant.snowy": "Snowy wolf",
+	"human-and-dog.variant.black": "Black wolf",
+	"human-and-dog.variant.ashen": "Ashen wolf",
+	"human-and-dog.variant.rusty": "Rusty wolf",
+	"human-and-dog.variant.chestnut": "Chestnut wolf",
+	"human-and-dog.variant.striped": "Striped wolf",
+
+	"human-and-dog.message.welcome": "Welcome to the game!!!",
+	"human-and-dog.message.spectator": "The human and the dog are ready - you are watching."
+}

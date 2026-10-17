@@ -1,0 +1,24 @@
+{
+	"required": true,
+	"package": "com.humananddog.client.mixin",
+	"compatibilityLevel": "JAVA_25",
+		"client": [
+			"BondClampMixin",
+			"ClientLivingEntityPushMixin",
+			"ClientPlayerPickableMixin",
+			"DogEyeHeightMixin",
+			"GameRendererMixin",
+			"HudMixin",
+			"IntegratedServerMixin",
+			"KeyboardHandlerMixin",
+			"LevelExtractorMixin",
+			"MinecraftMixin",
+			"MultiPlayerGameModeMixin"
+		],
+	"injectors": {
+		"defaultRequire": 1
+	},
+	"overwrites": {
+		"requireAnnotations": true
+	}
+}

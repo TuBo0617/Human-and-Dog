@@ -1,0 +1,35 @@
+{
+	"schemaVersion": 1,
+	"id": "human-and-dog",
+	"version": "${version}",
+	"name": "Human and Dog",
+	"description": "Two-player co-op: one plays the owner, one plays the tamed dog. Leashed within 15 blocks, shared life and death, linked dimensions.\n双人合作玩法：一人扮演主人，一人扮演被驯服的狗，15 格拴绳、生死与共、跨维度联动。",
+	"authors": [
+		"TuBo"
+	],
+	"contact": {},
+	"license": "CC0-1.0",
+	"icon": "assets/human-and-dog/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"com.humananddog.HumanAndDogMod"
+		],
+		"client": [
+			"com.humananddog.client.HumanAndDogClient"
+		]
+	},
+	"mixins": [
+		"human-and-dog.mixins.json",
+		{
+			"config": "human-and-dog.client.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~26.3",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}

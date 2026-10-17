@@ -1,0 +1,23 @@
+pluginManagement {
+	repositories {
+		// 阿里云镜像（国内加速）
+		maven {
+			name = 'AliyunGradlePlugin'
+			url = 'https://maven.aliyun.com/repository/gradle-plugin'
+		}
+		maven {
+			name = 'AliyunPublic'
+			url = 'https://maven.aliyun.com/repository/public'
+		}
+		// Fabric 官方源（Loom 插件只在官方源发布，必须保留）
+		maven {
+			name = 'Fabric'
+			url = 'https://maven.fabricmc.net/'
+		}
+		mavenCentral()
+		gradlePluginPortal()
+	}
+}
+
+// Should match your modid
+rootProject.name = 'human-and-dog'
