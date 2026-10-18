@@ -15,19 +15,23 @@ import net.minecraft.world.level.saveddata.SavedData;
 import net.minecraft.world.level.saveddata.SavedDataType;
 
 /**
- * 与存档绑定的"人狗同行"数据：每个玩家的角色、狗变种、项圈、狼铠，
+ * 与存档绑定的"人狗同行"数据：每个玩家的角色、狗变种、项圈、狼铠、年龄，
  * 以及房主和共享重生点。世界保存时随存档一起写入。
  */
 public class ModSaveData extends SavedData {
 	/** 单个玩家的可持久化信息。 */
 	public record SavedPlayer(String role, String dogVariant, boolean variantConfirmed,
-							  String collarColor, boolean hasArmor) {
+							  String collarColor, boolean hasArmor,
+							  boolean baby, boolean ageLocked, int growthTicks) {
 		public static final Codec<SavedPlayer> CODEC = RecordCodecBuilder.create(inst -> inst.group(
 			Codec.STRING.optionalFieldOf("role", "NONE").forGetter(SavedPlayer::role),
 			Codec.STRING.optionalFieldOf("dogVariant", "").forGetter(SavedPlayer::dogVariant),
 			Codec.BOOL.optionalFieldOf("variantConfirmed", false).forGetter(SavedPlayer::variantConfirmed),
 			Codec.STRING.optionalFieldOf("collarColor", "red").forGetter(SavedPlayer::collarColor),
-			Codec.BOOL.optionalFieldOf("hasArmor", false).forGetter(SavedPlayer::hasArmor)
+			Codec.BOOL.optionalFieldOf("hasArmor", false).forGetter(SavedPlayer::hasArmor),
+			Codec.BOOL.optionalFieldOf("baby", false).forGetter(SavedPlayer::baby),
+			Codec.BOOL.optionalFieldOf("ageLocked", false).forGetter(SavedPlayer::ageLocked),
+			Codec.INT.optionalFieldOf("growthTicks", 0).forGetter(SavedPlayer::growthTicks)
 		).apply(inst, SavedPlayer::new));
 	}
 
@@ -70,9 +74,9 @@ public class ModSaveData extends SavedData {
 		try {
 			ModSaveData d = new ModSaveData();
 			d.players.put(java.util.UUID.randomUUID().toString(),
-				new SavedPlayer("DOG", "minecraft:pale", true, "blue", true));
+				new SavedPlayer("DOG", "minecraft:pale", true, "blue", true, true, false, 0));
 			d.players.put(java.util.UUID.randomUUID().toString(),
-				new SavedPlayer("HUMAN", "", false, "red", false));
+				new SavedPlayer("HUMAN", "", false, "red", false, false, false, 0));
 			d.humanId = java.util.UUID.randomUUID().toString();
 			d.started = true;
 			d.respawn = GlobalPos.of(net.minecraft.world.level.Level.OVERWORLD,

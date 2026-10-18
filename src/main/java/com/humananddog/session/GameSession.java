@@ -9,6 +9,7 @@ import java.util.UUID;
 import com.humananddog.HumanAndDogMod;
 import com.humananddog.net.payload.DogVisualPayload;
 import com.humananddog.net.payload.GameStatePayload;
+import com.humananddog.net.payload.OpenDogAgeScreenPayload;
 import com.humananddog.net.payload.OpenDogVariantScreenPayload;
 import com.humananddog.net.payload.OpenRoleScreenPayload;
 import com.humananddog.net.payload.RoleStatePayload;
@@ -98,6 +99,10 @@ public class GameSession {
 			data.dogVariant = sp.dogVariant();
 			data.variantConfirmed = sp.variantConfirmed();
 			data.collarColor = sp.collarColor();
+			data.baby = sp.baby();
+			data.ageConfirmed = true;
+			data.ageLocked = sp.ageLocked();
+			data.growthTicks = sp.growthTicks();
 			if (sp.hasArmor()) {
 				data.wolfArmor = new ItemStack(Items.WOLF_ARMOR);
 			}
@@ -140,7 +145,10 @@ public class GameSession {
 				d.dogVariant,
 				d.variantConfirmed,
 				d.collarColor,
-				!d.wolfArmor.isEmpty()
+				!d.wolfArmor.isEmpty(),
+				d.baby,
+				d.ageLocked,
+				d.growthTicks
 			));
 		}
 		saveData.players = map;
@@ -268,7 +276,12 @@ public class GameSession {
 				if (!data.wolfArmor.isEmpty()) {
 					com.humananddog.mechanic.DogMechanic.applyArmorModifier(player, true);
 				}
-				if (!data.variantConfirmed) {
+				// 重连 / 恢复存档后同样要套用狗的小碰撞箱
+				player.refreshDimensions();
+				// 流程：先选年龄（小狗 / 成年狗），再选狼变种
+				if (!data.ageConfirmed) {
+					ServerPlayNetworking.send(player, new OpenDogAgeScreenPayload());
+				} else if (!data.variantConfirmed) {
 					ServerPlayNetworking.send(player, new OpenDogVariantScreenPayload());
 				}
 			}
@@ -291,6 +304,7 @@ public class GameSession {
 				}
 				data.dogVariant = "minecraft:pale";
 				data.variantConfirmed = true;
+				data.ageConfirmed = true;
 				com.humananddog.mechanic.DogMechanic.setupDog(player);
 				sharedRespawn = GlobalPos.of(player.level().dimension(),
 					BlockPos.containing(player.getX(), player.getY(), player.getZ()));
@@ -399,10 +413,15 @@ public class GameSession {
 		if (!data.wolfArmor.isEmpty()) {
 			com.humananddog.mechanic.DogMechanic.applyArmorModifier(player, true);
 		}
+		// 狗是 0.6×0.85 的碰撞箱（成年）/ 0.3×0.425（幼犬），需要立刻刷新尺寸缓存，
+		// 否则服务端仍按 1.8 高判定，钻不进一格高的空间。
+		player.refreshDimensions();
 		setPhase(GamePhase.WAITING_DOGS);
 		HumanAndDogMod.LOGGER.info("玩家 {} 自动成为狗", player.getName().getString());
-		// 狗首次进入需要选变种（先打开变种界面，再广播等待状态，避免被等待界面覆盖）
-		if (!data.variantConfirmed) {
+		// 流程：先选年龄（小狗 / 成年狗），再选狼变种；先开界面再广播等待状态，避免被等待界面覆盖
+		if (!data.ageConfirmed) {
+			ServerPlayNetworking.send(player, new OpenDogAgeScreenPayload());
+		} else if (!data.variantConfirmed) {
 			ServerPlayNetworking.send(player, new OpenDogVariantScreenPayload());
 		}
 		syncRoleState();
@@ -460,6 +479,24 @@ public class GameSession {
 		}
 		syncRoleState();
 		recheckStart();
+		save();
+	}
+
+	/** 狗选择"小狗 / 成年狗"；选完立刻接着弹狼变种界面。 */
+	public void selectDogAge(ServerPlayer player, boolean baby) {
+		PlayerData data = data(player);
+		if (data == null || data.role != Role.DOG || data.ageConfirmed) {
+			return;
+		}
+		data.baby = baby;
+		data.ageConfirmed = true;
+		data.ageLocked = false;
+		data.growthTicks = 0;
+		HumanAndDogMod.LOGGER.info("狗 {} 选择了{}", player.getName().getString(), baby ? "小狗" : "成年狗");
+		// 尺寸 / 眼高随年龄变化，必须刷新
+		player.refreshDimensions();
+		broadcastDogVisual(player);
+		ServerPlayNetworking.send(player, new OpenDogVariantScreenPayload());
 		save();
 	}
 
@@ -680,7 +717,7 @@ public class GameSession {
 		for (ServerPlayer dog : dogs()) {
 			PlayerData d = data(dog);
 			if (d != null) {
-				com.humananddog.mechanic.DogMechanic.tickDog(dog, d);
+				com.humananddog.mechanic.DogMechanic.tickDog(this, dog, d);
 			}
 		}
 	}
@@ -706,20 +743,26 @@ public class GameSession {
 		syncAll();
 	}
 
-	/** 无碰撞队伍名（隐藏不显示在玩家名牌上，只用于关闭人狗互相推挤）。 */
+	/** 队伍名（隐藏不显示在玩家名牌上；只用来关掉"队友可见隐形"）。 */
 	private static final String NO_COLLISION_TEAM = "hd_nocollision";
 
 	/**
-	 * 把本局所有参与者放进同一个记分板队伍并把碰撞规则设为 NEVER：
-	 * 原版会据此让他们在客户端与服务端都互不碰撞、互不推挤，
-	 * 从根上消除"人狗重叠出生后松开按键仍被缓慢推开"的漂移。
-	 * 该规则只影响玩家之间，不影响玩家与生物 / 方块。
+	 * 把本局参与者放进同一个记分板队伍，只为了关掉"队友可见隐形"
+	 * （否则客户端把狗本体设为隐身后，队友仍能看到半透明人形）。
+	 *
+	 * <p>碰撞规则必须是 {@code ALWAYS}：原版 {@code EntitySelector.pushableBy()} 里，
+	 * 实体自己队伍的规则为 {@code NEVER} 时"任何人都推不动它"（直接 alwaysFalse），
+	 * 之前设成 NEVER 就是为了防人狗互推，结果连生物都挤不动狗了。
+	 * 现在改为由 {@code LivingEntityPushMixin} 只取消"人↔狗"之间的互推，
+	 * 其他玩家与生物都能正常挤压狗。
 	 */
 	private void ensureNoCollisionTeam() {
 		PlayerTeam team = server.getScoreboard().getPlayerTeam(NO_COLLISION_TEAM);
 		if (team == null) {
 			team = server.getScoreboard().addPlayerTeam(NO_COLLISION_TEAM);
-			team.setCollisionRule(Team.CollisionRule.NEVER);
+		}
+		if (team.getCollisionRule() != Team.CollisionRule.ALWAYS) {
+			team.setCollisionRule(Team.CollisionRule.ALWAYS);
 		}
 		// 队伍默认 seeFriendlyInvisibles=true，而原版 Entity.isInvisibleTo() 的规则是
 		// "同一队伍且队友可见隐形 → 隐形对队友无效"。客户端把狗玩家本体设为隐身后，
@@ -775,7 +818,8 @@ public class GameSession {
 			d.dogVariant,
 			color.getId(),
 			d.sitting,
-			!d.wolfArmor.isEmpty()
+			!d.wolfArmor.isEmpty(),
+			d.baby
 		));
 	}
 

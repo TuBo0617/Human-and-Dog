@@ -4,9 +4,9 @@
 	"compatibilityLevel": "JAVA_25",
 		"client": [
 			"BondClampMixin",
-			"ClientLivingEntityPushMixin",
 			"ClientPlayerPickableMixin",
-			"DogEyeHeightMixin",
+			"DogInvisibleMixin",
+			"DogSprintMixin",
 			"GameRendererMixin",
 			"HudMixin",
 			"IntegratedServerMixin",

@@ -11,7 +11,7 @@ import net.minecraft.client.Minecraft;
  */
 public final class ClientState {
 	/** 一只狗玩家的外观数据。 */
-	public record DogVisual(String variantId, int collarColor, boolean sitting, boolean hasArmor) {
+	public record DogVisual(String variantId, int collarColor, boolean sitting, boolean hasArmor, boolean baby) {
 	}
 
 	public static String phase = "WAITING_HUMAN";
@@ -52,6 +52,13 @@ public final class ClientState {
 
 	public static boolean isDog(UUID id) {
 		return DOGS.containsKey(id);
+	}
+
+	/** uuid -> 是否小狗，供 {@code DogLookup} 在客户端判断碰撞箱 / 眼高。 */
+	public static Map<UUID, Boolean> dogBabyFlags() {
+		Map<UUID, Boolean> map = new HashMap<>();
+		DOGS.forEach((id, visual) -> map.put(id, visual.baby()));
+		return map;
 	}
 
 	public static boolean isSpectator() {

@@ -8,6 +8,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import com.humananddog.client.ClientState;
+import com.humananddog.role.DogLookup;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.CameraType;
@@ -66,14 +67,9 @@ public final class DogClientManager {
 		if (level != currentLevel) {
 			clear();
 			currentLevel = level;
-			// 切换后的头一两帧 level.players() 可能还没同步到实体，先把本地狗本体藏好，
-			// 避免第三人称下闪一下人形（拍平判定与 sync 内保持一致）。
-			if (ClientState.isDog(mc.player.getUUID())) {
-				boolean selfFirstPerson = ClientState.dogLowCamera
-					&& mc.options.getCameraType().isFirstPerson();
-				mc.player.setInvisible(!selfFirstPerson);
-			}
 		}
+		// 让 main 源集的碰撞箱 / 眼高 mixin 在客户端也能认出谁是狗、谁是幼犬
+		DogLookup.setClientDogs(ClientState.dogBabyFlags());
 
 		// 狗没有物品栏，按 E 打开自己的物品栏时立即关闭
 		if (ClientState.isDog(mc.player.getUUID())
@@ -124,6 +120,7 @@ public final class DogClientManager {
 				WOLVES.put(id, wolf);
 			}
 			sync(wolf, player, visual, human);
+			ensureDogDimensions(player, visual);
 		}
 
 		Iterator<Map.Entry<UUID, DummyWolf>> it = WOLVES.entrySet().iterator();
@@ -172,14 +169,12 @@ public final class DogClientManager {
 		// 完全无碰撞，避免替身狼与狗玩家重叠时互相推挤造成漂移
 		wolf.noPhysics = true;
 
-		// 本地狗在 F6 第一人称低视角时：
-		//  - 自己的替身狼必须隐藏（否则相机下移到狼眼高度后会落进狼模型内部，画面被狼身体填满）；
-		//  - 本体必须暂时"不隐形"，否则第一人称空手手臂不会被渲染出来。
-		// 第三人称（看狼）以及其他玩家看到的狗：本体隐形、替身狼可见。
+		// 本地狗在 F6 第一人称低视角时隐藏自己的替身狼（否则相机会落进狼模型内部）。
+		// 狗本体是否渲染由 DogInvisibleMixin 统一控制（覆盖 isInvisible），这里不再动 setInvisible，
+		// 避免与服务端同步的隐形标志打架产生"蹲下闪人形"。
 		boolean selfFirstPerson = player == Minecraft.getInstance().player
 			&& ClientState.dogLowCamera
 			&& Minecraft.getInstance().options.getCameraType().isFirstPerson();
-		player.setInvisible(!selfFirstPerson);
 		wolf.setInvisible(selfFirstPerson);
 
 		// 名牌：用纯文本玩家名，强制常显（与命名牌命名的狼一致）；
@@ -214,8 +209,19 @@ public final class DogClientManager {
 		wolf.setOrderedToSit(visual.sitting());
 		wolf.setInSittingPose(visual.sitting());
 
-		// 狼铠
-		wolf.setItemSlot(EquipmentSlot.BODY, visual.hasArmor() ? new ItemStack(Items.WOLF_ARMOR) : ItemStack.EMPTY);
+		// 狼铠：第一人称低视角时替身狼是隐藏的，但 WolfArmorLayer 不看隐形标志、
+		// 仍然会把护甲画出来，于是"狼铠糊在镜头前"。隐藏替身狼时必须把护甲槽清空。
+		ItemStack armorStack = visual.hasArmor() && !selfFirstPerson
+			? new ItemStack(Items.WOLF_ARMOR)
+			: ItemStack.EMPTY;
+		wolf.setItemSlot(EquipmentSlot.BODY, armorStack);
+
+		// 幼犬 / 成年：切换模型与尺寸
+		if (wolf.isBaby() != visual.baby()) {
+			wolf.setBaby(visual.baby());
+			// 本地玩家的碰撞箱由 DogDimensionsMixin 决定，尺寸缓存需要刷新才会生效
+			player.refreshDimensions();
+		}
 
 		// 生命与玩家一致
 		wolf.setHealth(Math.max(1.0F, Math.min(player.getHealth(), wolf.getMaxHealth())));
@@ -227,6 +233,20 @@ public final class DogClientManager {
 		}
 		WOLVES.clear();
 		currentLevel = null;
+	}
+
+	/**
+	 * 让狗玩家的碰撞箱跟上"成年 / 幼犬"。尺寸缓存只在 refreshDimensions() 时更新，
+	 * 刚变成狗、或者刚长大时客户端不会自动刷新，这里按预期尺寸自检一次。
+	 */
+	private static void ensureDogDimensions(Player player, ClientState.DogVisual visual) {
+		float expected = visual.baby() ? 0.425F : 0.85F;
+		if (Math.abs(player.getBbHeight() - expected) > 0.01F) {
+			float oldHeight = player.getBbHeight();
+			player.refreshDimensions();
+			com.humananddog.HumanAndDogMod.LOGGER.info("[HD] 客户端碰撞箱 {} -> {}（{}）",
+				oldHeight, player.getBbHeight(), player.getName().getString());
+		}
 	}
 
 	/** 从"狼自己所属的世界"里移除它（维度切换后 mc.level 已经不是它所在的世界了）。 */

@@ -7,9 +7,12 @@
 		"ServerGamePacketListenerImplMixin",
 		"CommandsMixin",
 		"MobMixin",
+		"FoodDataMixin",
+		"DogDimensionsMixin",
+		"DogEyeHeightMixin",
+		"PlayerSoundMixin",
 		"AbstractSkeletonMixin",
-		"ItemEntityMixin",
-		"LivingEntityPushMixin"
+		"ItemEntityMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

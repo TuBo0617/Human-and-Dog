@@ -1,6 +1,8 @@
 {
+	"key.category.human-and-dog.keys": "人狗同行",
 	"key.categories.human-and-dog": "人狗同行",
 	"key.human-and-dog.dog_camera": "切换狗的低视角",
+	"key.human-and-dog.bark": "狗叫",
 
 	"human-and-dog.screen.role.title": "选择你的角色",
 	"human-and-dog.screen.role.hint": "人、狗各一名，其余玩家自动观战",
@@ -10,6 +12,10 @@
 
 	"human-and-dog.screen.waiting.title": "等待其他玩家加入并准备…",
 	"human-and-dog.screen.countdown.title": "即将重生…",
+	"human-and-dog.screen.age.title": "选择狗的年龄",
+	"human-and-dog.screen.age.hint": "小狗可以用金蒲公英锁住年龄，永远保持幼犬",
+	"human-and-dog.button.puppy": "小狗",
+	"human-and-dog.button.adult": "成年狗",
 	"human-and-dog.screen.variant.title": "选择狗的类型",
 
 	"human-and-dog.variant.woods": "丛林狗",

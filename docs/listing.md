@@ -4,7 +4,7 @@
 > Ready-to-paste listing copy for both platforms (EN + ZH).
 
 - Mod id：`human-and-dog`
-- 版本：`1.0.0`
+- 版本：`1.3.0`
 - 支持：Minecraft **26.3** / Fabric Loader **≥ 0.19.5** / Java **25**
 - 依赖：**Fabric API**（同游戏版本，必装）
 - 许可证：**CC0-1.0**
@@ -50,20 +50,33 @@ to their owner's right click.
   respawn together at a shared respawn point. One bed, one fate.
 - **Linked dimensions.** Walk through a portal and your partner is dragged through with you.
 - **Real dog rules.** 40 HP, 4 damage bare-pawed, wolf armor grants 11 armor, dye the collar,
-  order the dog to sit, hunger and saturation are always full. No inventory, no item use, no
-  block breaking, no pickup — but boats, beds and naps are allowed. Mobs ignore the dog until it
-  attacks them; once it does, they fight back (and skeletons still flee from it).
+  order the dog to sit. No inventory, no item use, no block breaking, no pickup — but boats,
+  beds and naps are allowed. Mobs ignore the dog until it attacks them; once it does, they fight
+  back (and skeletons still flee from it).
+- **No hunger, only handouts.** The dog has no hunger or saturation at all. It never regenerates
+  on its own and never starves — the only way to heal is for the owner to hand it food. Sprinting
+  is unlimited. Golden apples, enchanted golden apples and suspicious stew all apply their real
+  effects to the dog.
+- **Puppies and family.** After picking the dog role you choose puppy or adult, then a wolf
+  variant. Puppies grow up in 20 minutes, or feed a golden dandelion to keep them small forever.
+  Feed a full-health dog and it falls in love — a tamed wolf nearby walks over and, after a
+  moment, gives birth to a puppy that belongs to you.
+- **A real body.** The dog uses the vanilla wolf hitbox (0.6 × 0.85, puppies 0.3 × 0.425), fits
+  through one-block gaps, and can be pushed by players and mobs. You can hit it too — damage runs
+  through the normal rules, so it triggers the shared-death countdown.
+- **Bark.** Press **V** to bark with the vanilla wolf sound (dogs only; humans and spectators get
+  nothing). Being hit plays the vanilla wolf hurt sound as well.
 - **Spectators.** Human and dog slots are one each. Everyone else joins in spectator mode and
   can watch the run; the role screen greys out roles that are already taken.
 
 ## How to play
 
 1. Create a world (or join a server) with Fabric API installed.
-2. The first player picks **human** or **dog**; the dog then picks one of the 9 wolf variants.
+2. The first player picks **human** or **dog**; the dog then picks puppy or adult, and one of the 9 wolf variants.
 3. Share the world over LAN (or run a dedicated server) and have a friend join.
 4. When both slots are filled the game starts with a "Welcome!" message in chat.
 
-Default key: **F6** toggles the dog's first/third person view.
+Default keys: **F6** toggles the dog's first/third person view; **V** barks.
 
 ## Requirements
 
@@ -99,20 +112,28 @@ English and Simplified Chinese are bundled. Other locales fall back to English.
 - **生死与共。** 任意一方死亡都会被取消：双方定格、3 秒倒计时后一起在共享重生点复活。
   一张床，一条命。
 - **跨维度联动。** 一方走进传送门，另一方会被一起拽过去。
-- **完整的狗规则。** 40 血、空手 4 点伤害、狼铠 +11 护甲、可染项圈、可命令坐下、饥饿与饱和度恒满；
+- **完整的狗规则。** 40 血、空手 4 点伤害、狼铠 +11 护甲、可染项圈、可命令坐下；
   没有背包、不能用物品、不能破坏方块、不能拾取 —— 但可以上船、可以睡觉。
   生物默认无视狗，狗一旦先动手就会被记仇围攻（骷髅依然会躲着狗走）。
+- **没有饱食度，只能靠投喂。** 狗彻底没有饥饿与饱和度：不会自然回血、也不会饿死，
+  唯一的回血方式是主人喂食。疾跑不受饥饿限制。金苹果、附魔金苹果、谜之炖菜都对狗生效。
+- **小狗与繁衍。** 选完「当狗」后先选小狗或成年狗，再选狼变种。小狗 20 分钟后长大，
+  也可以喂金蒲公英让它永远是幼犬。给满血的狗喂食会让它进入寻爱状态，
+  附近的驯服狼会走过来，过一会儿生下一只属于你的小狗。
+- **真正的身体。** 狗使用原版狼的碰撞箱（成年 0.6×0.85，幼犬 0.3×0.425），能穿过一格高的缝隙，
+  也会被玩家和生物挤压。人也可以打狗，伤害走原版流程，因此会触发死亡联动倒计时。
+- **狗叫。** 按 **V** 发出原版狼叫（只有狗能用，人和观战者按了没反应）；被打时同样播放原版狼的受伤音效。
 - **观战者。** 人和狗各只有一个名额；人狗都就位后，后来进入的玩家自动进入旁观模式观战，
   角色界面上已被占用的选项会置灰。
 
 ## 怎么玩
 
 1. 装好 Fabric API，新建世界（或进入已装模组的服务器）。
-2. 第一位玩家选择「当人」或「当狗」；选狗的人再挑一种狼变种。
+2. 第一位玩家选择「当人」或「当狗」；选狗的人再选小狗或成年狗，然后挑一种狼变种。
 3. 通过「对局域网开放」或专用服务器拉第二位玩家进来。
 4. 人和狗都就位后，聊天框会显示「欢迎游玩！！！」并正式开局。
 
-默认按键：**F6** 切换狗的第一 / 第三人称视角。
+默认按键：**F6** 切换狗的第一 / 第三人称视角；**V** 狗叫。
 
 ## 前置
 
@@ -147,9 +168,38 @@ English and Simplified Chinese are bundled. Other locales fall back to English.
 > 两个平台都支持 `Modrinth/CurseForge 项目关系`：把 **Fabric API** 标成 Required dependency，
 > 加载器标 Fabric，环境标 Client+Server。
 
-## 5. 更新日志 / Changelog (1.0.0)
+## 5. 更新日志 / Changelog (1.3.0)
 
 ```markdown
+### 1.3.0 — puppies, handouts and a real body
+
+**Added**
+- Choose the dog's age (puppy / adult) right after picking the dog role, then pick a wolf variant.
+  Puppies grow up after 20 minutes; feed a golden dandelion to lock the age forever (and again to unlock).
+- Love mode: feeding a dog at full health makes hearts float above its head. If a tamed wolf
+  nearby is in love too, it walks over and after a moment gives birth to a puppy owned by the dog player.
+- Golden apples, enchanted golden apples and suspicious stew now apply their real effects to the dog.
+- Bark keybind (default **V**) — dogs only, vanilla wolf sound. Being hit plays the vanilla wolf hurt sound too.
+- The dog now has a real hitbox (0.6 × 0.85, puppies 0.3 × 0.425) that players and mobs can push against.
+- Humans can now hit the dog; damage runs through the normal rules, so it can trigger the shared-death countdown.
+
+**Changed**
+- Hunger and saturation are gone: the hunger bar is hidden, there is no natural regeneration and
+  no starvation. Health only comes back from food the owner hands over (2 × nutrition, same as
+  vanilla wolf feeding).
+- Dogs can sprint forever without saturation.
+- Adult and puppy dogs both fit through one-block-high gaps.
+- The dog uses vanilla wolf ambient/hurt sounds instead of human ones.
+
+**Fixed**
+- Looking at an enderman's eyes as a dog did not anger it.
+- The human silhouette flashed for a frame when the dog crouched or stood up.
+- Wolf armor could not be equipped by right-clicking the dog, and shears could not take it off.
+- Wolf armor covered the dog's first-person view.
+- With hitboxes shown (F3+B) the dog still could not enter one-block gaps — the server kept a
+  stale 1.8-high size cache. It is now re-checked every tick.
+- Mobs no longer target the dog out of nowhere; they retaliate only after the dog hits them.
+
 ### 1.2.0 — dog combat & comfort
 - Dog hunger and saturation are locked at full
 - Mobs now retaliate against the dog after it attacks them (they still ignore it otherwise)
@@ -164,6 +214,33 @@ English and Simplified Chinese are bundled. Other locales fall back to English.
 - zh_cn + en_us localisation
 ```
 ```markdown
+### 1.3.0 — 小狗、投喂与真正的身体
+
+**新增**
+- 选完「当狗」后先选年龄（小狗 / 成年狗），再选狼变种；小狗 20 分钟后长大，
+  喂金蒲公英可永久锁住幼犬形态（再喂一次解锁）。
+- 寻爱：满血时被喂食会头顶冒爱心。附近若有同样在寻爱的驯服狼，它会走过来，
+  过一会儿生下一只归属于狗玩家的小狗。
+- 金苹果、附魔金苹果、谜之炖菜对狗生效，获得对应原版效果。
+- 新增「狗叫」按键（默认 **V**），只有狗能用，播放原版狼叫；被打时也会播放原版狼的受伤音效。
+- 狗拥有真正的碰撞箱（成年 0.6×0.85，幼犬 0.3×0.425），可以被玩家和生物挤压。
+- 人可以攻击狗；伤害走原版流程，因此会触发死亡联动倒计时。
+
+**改动**
+- 删除饱食度与饱和度：饥饿条隐藏、不再自然回血、不会饿死；血量只能靠主人喂食恢复
+  （每份食物回 2×营养值，与原版喂狼一致）。
+- 狗无需饱和度即可无限疾跑。
+- 成年狗与小狗都能穿过一格高的空间。
+- 狗的叫声、受伤声改用原版狼音效，不再是人的声音。
+
+**修复**
+- 狗直视末影人眼睛时不再无法激怒末影人。
+- 狗蹲下 / 起身的瞬间不再闪现人形。
+- 狼铠可以右键给狗穿上，也可以用剪刀右键取下。
+- 穿狼铠后不再遮挡狗的第一人称视野。
+- 开启碰撞箱显示（F3+B）时狗仍进不去一格高的空间（服务端尺寸缓存停在 1.8 高），现已每 tick 自愈。
+- 生物不再无缘无故把狗当目标，只有狗先动手才会记仇还击。
+
 ### 1.2.0 — 狗的战斗力与舒适度
 - 狗的饥饿值与饱和度锁定为满值
 - 狗攻击敌对/中立生物后会被记仇反击（不主动惹事则依旧被无视）

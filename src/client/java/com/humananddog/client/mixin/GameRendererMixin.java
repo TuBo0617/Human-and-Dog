@@ -10,7 +10,7 @@ import com.humananddog.client.ClientState;
 import net.minecraft.client.renderer.GameRenderer;
 
 /**
- * 狗第一人称默认不渲染手；按 F6 进入低视角后显示手。
+ * 狗第一人称默认不渲染手；按 F6 进入低视角后显示手（保持原有行为）。
  */
 @Mixin(GameRenderer.class)
 public class GameRendererMixin {

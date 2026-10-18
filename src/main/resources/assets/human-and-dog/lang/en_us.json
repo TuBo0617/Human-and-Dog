@@ -1,6 +1,8 @@
 {
+	"key.category.human-and-dog.keys": "Human and Dog",
 	"key.categories.human-and-dog": "Human and Dog",
 	"key.human-and-dog.dog_camera": "Toggle dog's low camera",
+	"key.human-and-dog.bark": "Bark",
 
 	"human-and-dog.screen.role.title": "Choose your role",
 	"human-and-dog.screen.role.hint": "One human, one dog. Everyone else watches.",
@@ -10,6 +12,10 @@
 
 	"human-and-dog.screen.waiting.title": "Waiting for other players…",
 	"human-and-dog.screen.countdown.title": "Respawning…",
+	"human-and-dog.screen.age.title": "Choose your dog's age",
+	"human-and-dog.screen.age.hint": "A puppy can be kept young with a golden dandelion",
+	"human-and-dog.button.puppy": "Puppy",
+	"human-and-dog.button.adult": "Adult dog",
 	"human-and-dog.screen.variant.title": "Choose your dog variant",
 
 	"human-and-dog.variant.woods": "Woods wolf",
