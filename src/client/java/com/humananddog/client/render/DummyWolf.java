@@ -96,6 +96,18 @@ public class DummyWolf extends Wolf {
 		return false;
 	}
 
+	/**
+	 * 让 Jade 之类的目标过滤器忽略替身狼，把显示机会留给真正的狗玩家。
+	 *
+	 * <p>Jade 的 {@code canBeTarget} 会跳过"隐形且没穿护甲"的实体，而狼铠所在的
+	 * {@code BODY} 槽是 {@code ANIMAL_ARMOR}、不算护甲，所以这里恒为 true 就能稳定过滤掉它。
+	 * 渲染用的是 {@code isInvisible()}，不受影响，狼照常画出来。
+	 */
+	@Override
+	public boolean isInvisibleTo(net.minecraft.world.entity.player.Player player) {
+		return true;
+	}
+
 	@Override
 	public boolean isPushable() {
 		return false;

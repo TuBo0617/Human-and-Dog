@@ -33,4 +33,19 @@ public abstract class DogInvisibleMixin {
 			&& Minecraft.getInstance().options.getCameraType().isFirstPerson();
 		cir.setReturnValue(!selfFirstPerson);
 	}
+
+	/**
+	 * 只对"信息显示 mod"放行隐形判定。
+	 *
+	 * <p>渲染走的是 {@code isInvisible()}（{@code EntityRenderer} 取的就是它），所以这里返回
+	 * false 不会让隐身的人形露出来；但 Jade（玉）的 {@code canBeTarget} 用的是
+	 * {@code isInvisibleTo(player)}：隐形 + 没穿护甲的实体会被直接过滤掉，
+	 * 于是狗玩家永远显示不出血量与效果。两个方法分开覆盖即可各取所需。
+	 */
+	@Inject(method = "isInvisibleTo", at = @At("HEAD"), cancellable = true)
+	private void humananddog$dogVisibleToInfoMods(Player viewer, CallbackInfoReturnable<Boolean> cir) {
+		if ((Object) this instanceof Player player && ClientState.isDog(player.getUUID())) {
+			cir.setReturnValue(false);
+		}
+	}
 }

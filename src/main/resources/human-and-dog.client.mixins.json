@@ -5,6 +5,7 @@
 		"client": [
 			"BondClampMixin",
 			"DogInvisibleMixin",
+			"DogNameTagMixin",
 			"DogSitInputMixin",
 			"DogSprintMixin",
 			"GameRendererMixin",

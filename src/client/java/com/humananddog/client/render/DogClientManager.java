@@ -231,6 +231,15 @@ public final class DogClientManager {
 
 		// 生命与玩家一致
 		wolf.setHealth(Math.max(1.0F, Math.min(player.getHealth(), wolf.getMaxHealth())));
+
+		// 客户端不会同步"其他玩家"的属性，狗的 MAX_HEALTH 在别人那里仍是 20。
+		// 按狗的上限补一下，Jade（玉）之类的 mod 才会显示成 40 而不是 20。
+		net.minecraft.world.entity.ai.attributes.AttributeInstance maxHealth =
+			player.getAttribute(net.minecraft.world.entity.ai.attributes.Attributes.MAX_HEALTH);
+		if (maxHealth != null
+			&& Math.abs(maxHealth.getBaseValue() - com.humananddog.mechanic.DogMechanic.DOG_MAX_HEALTH) > 0.01) {
+			maxHealth.setBaseValue(com.humananddog.mechanic.DogMechanic.DOG_MAX_HEALTH);
+		}
 	}
 
 	public static void clear() {
