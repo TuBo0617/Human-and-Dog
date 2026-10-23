@@ -1,7 +1,5 @@
 {
 	"key.category.human-and-dog.keys": "人狗同行",
-	"key.categories.human-and-dog": "人狗同行",
-	"key.human-and-dog.dog_camera": "切换狗的低视角",
 	"key.human-and-dog.bark": "狗叫",
 
 	"human-and-dog.screen.role.title": "选择你的角色",
@@ -29,5 +27,19 @@
 	"human-and-dog.variant.striped": "条纹狗",
 
 	"human-and-dog.message.welcome": "欢迎游玩！！！",
-	"human-and-dog.message.spectator": "人狗已就位，你以观战者身份加入。"
+	"human-and-dog.message.spectator": "人狗已就位，你以观战者身份加入。",
+
+	"human-and-dog.role.human": "人",
+	"human-and-dog.role.dog": "狗",
+	"human-and-dog.role.spectator": "观战者",
+	"human-and-dog.role.none": "未选择",
+
+	"human-and-dog.command.role.success": "身份已切换为：%s",
+	"human-and-dog.command.role.taken": "这个身份已经有人了：%s",
+	"human-and-dog.command.role.locked": "游戏已经开始，不能再切换身份",
+	"human-and-dog.command.role.invalid": "未知身份：%s（可用 human / dog / spectator）",
+	"human-and-dog.command.age.only_dog": "只有狗可以使用这个指令",
+	"human-and-dog.command.age.ok": "请选择小狗或成年狗，然后再选择狗的类型",
+	"human-and-dog.command.swap.need_both": "需要人和狗同时在线才能互换身份",
+	"human-and-dog.command.swap.done": "已互换人与狗的身份"
 }

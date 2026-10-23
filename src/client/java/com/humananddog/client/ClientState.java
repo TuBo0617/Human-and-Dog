@@ -16,8 +16,6 @@ public final class ClientState {
 
 	public static String phase = "WAITING_HUMAN";
 	public static int countdown = 0;
-	/** 狗玩家按 F6 切换：是否使用低视角（贴地狼眼高度的第一人称）。 */
-	public static boolean dogLowCamera = false;
 	/** 自己的身份：NONE / HUMAN / DOG / SPECTATOR（由 RoleStatePayload 同步）。 */
 	public static String myRole = "NONE";
 	/** 人 / 狗身份是否已被占用（角色界面据此置灰）。 */
@@ -31,7 +29,6 @@ public final class ClientState {
 	public static void reset() {
 		phase = "WAITING_HUMAN";
 		countdown = 0;
-		dogLowCamera = false;
 		myRole = "NONE";
 		humanTaken = false;
 		dogTaken = false;
@@ -69,5 +66,15 @@ public final class ClientState {
 	public static boolean localPlayerIsDog() {
 		return Minecraft.getInstance().player != null
 			&& isDog(Minecraft.getInstance().player.getUUID());
+	}
+
+	/** 本地狗是否正被主人命令坐下（坐下时不允许移动）。 */
+	public static boolean isLocalDogSitting() {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.player == null) {
+			return false;
+		}
+		DogVisual visual = DOGS.get(mc.player.getUUID());
+		return visual != null && visual.sitting();
 	}
 }

@@ -22,6 +22,8 @@ jobs:
       - name: make gradle wrapper executable
         run: chmod +x ./gradlew
       - name: build
+        # gradle.properties 里写死了本机的 Windows JDK 路径，CI 上要用 setup-java 提供的 JDK，
+        # 这里用命令行参数覆盖掉它（-D 优先级高于 gradle.properties）。
         run: ./gradlew build -Dorg.gradle.java.home=$JAVA_HOME
       - name: capture build artifacts
         uses: actions/upload-artifact@v7

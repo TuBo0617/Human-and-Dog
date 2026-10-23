@@ -5,7 +5,6 @@
 	"mixins": [
 		"ServerPlayerMixin",
 		"ServerGamePacketListenerImplMixin",
-		"CommandsMixin",
 		"MobMixin",
 		"FoodDataMixin",
 		"DogDimensionsMixin",

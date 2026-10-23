@@ -4,7 +4,7 @@
 > Ready-to-paste listing copy for both platforms (EN + ZH).
 
 - Mod id：`human-and-dog`
-- 版本：`1.3.0`
+- 版本：`1.4.0`
 - 支持：Minecraft **26.3** / Fabric Loader **≥ 0.19.5** / Java **25**
 - 依赖：**Fabric API**（同游戏版本，必装）
 - 许可证：**CC0-1.0**
@@ -76,7 +76,7 @@ to their owner's right click.
 3. Share the world over LAN (or run a dedicated server) and have a friend join.
 4. When both slots are filled the game starts with a "Welcome!" message in chat.
 
-Default keys: **F6** toggles the dog's first/third person view; **V** barks.
+Default keys: **F5** cycles first person / third person back / third person front; **V** barks.
 
 ## Requirements
 
@@ -133,7 +133,7 @@ English and Simplified Chinese are bundled. Other locales fall back to English.
 3. 通过「对局域网开放」或专用服务器拉第二位玩家进来。
 4. 人和狗都就位后，聊天框会显示「欢迎游玩！！！」并正式开局。
 
-默认按键：**F6** 切换狗的第一 / 第三人称视角；**V** 狗叫。
+默认按键：**F5** 循环第一人称 / 第三人称背面 / 第三人称正面；**V** 狗叫。
 
 ## 前置
 
@@ -168,9 +168,33 @@ English and Simplified Chinese are bundled. Other locales fall back to English.
 > 两个平台都支持 `Modrinth/CurseForge 项目关系`：把 **Fabric API** 标成 Required dependency，
 > 加载器标 Fabric，环境标 Client+Server。
 
-## 5. 更新日志 / Changelog (1.3.0)
+## 5. 更新日志 / Changelog (1.4.0)
 
 ```markdown
+### 1.4.0 — commands, camera and a calmer ride
+
+**Added**
+- `/hd role <human|dog|spectator>` — change your role while the game is still waiting to start.
+  Roles already taken stay greyed out; once the game starts the command is locked.
+- `/hd age` — dogs only: reopen the puppy/adult + variant picker and apply the new look immediately.
+- `/hd swap` — operators only: swap the human and the dog when both are online.
+- Press **T** on the waiting screen to type commands.
+- The dog shakes itself dry after leaving water, just like a vanilla wolf.
+
+**Changed**
+- The camera is cycled with **F5** again (first person / third person back / third person front).
+- F3+F4 can open the game-mode switcher again.
+
+**Fixed**
+- A non-host player leaving now pauses the world and shows the waiting screen until they return.
+- New players saw role buttons that looked clickable even when the slot was already taken.
+- The dog's body jittered while riding a boat (much worse as a passenger).
+- A dog told to sit could still walk around on its own screen while everyone else saw it sitting.
+- Jade and other WAILA-style mods now show the dog's real health, effects and status — the crosshair
+  targets the actual player instead of the visual wolf.
+- Rejoining a saved world could leave both players stuck on the waiting screen even after the dog
+  arrived; the dog list is now derived from the actual roles instead of a cached index.
+
 ### 1.3.0 — puppies, handouts and a real body
 
 **Added**
@@ -214,6 +238,29 @@ English and Simplified Chinese are bundled. Other locales fall back to English.
 - zh_cn + en_us localisation
 ```
 ```markdown
+### 1.4.0 — 指令、视角与更稳的骑乘
+
+**新增**
+- `/hd role <human|dog|spectator>`：开局前修改自己的身份；已被占用的身份置灰不可选，开局后该指令锁定。
+- `/hd age`：只有狗能用，重新打开「小狗/成年狗 + 类型」选择并立即生效。
+- `/hd swap`：需要管理员权限，人和狗同时在线时互换身份。
+- 等待界面按 **T** 可以直接输入指令。
+- 狗离开水面后会像原版狼一样甩水。
+
+**改动**
+- 视角改回用 **F5** 循环（第一人称 / 第三人称背面 / 第三人称正面）。
+- F3+F4 重新可以打开游戏模式切换。
+
+**修复**
+- 非房主玩家退出后会暂停世界并显示等待界面，回来即继续。
+- 新玩家在角色界面看到本已被占用的身份仍然可点。
+- 狗在船上身体抖动（当乘客时更严重）。
+- 被命令坐下的狗在自己视角里还能到处走。
+- 装了 Jade（玉）等信息显示 mod 后，准星对着狗无法显示血量、药水效果与状态；现在准星命中真实的
+  狗玩家而不是替身狼。
+- 重新进入已保存的世界后，狗已经进服却仍然卡在「等待其他玩家加入」；狗名单改为按真实角色推导，
+  不再依赖可能失同步的缓存索引。
+
 ### 1.3.0 — 小狗、投喂与真正的身体
 
 **新增**

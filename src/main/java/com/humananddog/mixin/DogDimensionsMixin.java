@@ -29,4 +29,22 @@ public abstract class DogDimensionsMixin {
 			cir.setReturnValue(DogLookup.isBaby(self) ? DOG_BABY : DOG_ADULT);
 		}
 	}
+
+	/**
+	 * 直接在 {@code getDimensions(Pose)} 上再兜一层：原版这里会按姿势取尺寸并乘上实体 scale，
+	 * 蹲下 / 游泳 / 爬行时走的都是不同分支。狗的尺寸与姿势无关（除了睡觉），
+	 * 统一在这里返回狼的尺寸，避免任何姿势下退回 1.8 高、钻不进一格高的空间。
+	 */
+	@Inject(method = "getDimensions", at = @At("HEAD"), cancellable = true)
+	private void humanAndDog$dogDimensionsAnyPose(Pose pose, CallbackInfoReturnable<EntityDimensions> cir) {
+		Entity self = (Entity) (Object) this;
+		if (!DogLookup.isDog(self)) {
+			return;
+		}
+		// 睡觉沿用原版的趴姿尺寸，否则狗躺床上会被撑起来
+		if (pose == Pose.SLEEPING) {
+			return;
+		}
+		cir.setReturnValue(DogLookup.isBaby(self) ? DOG_BABY : DOG_ADULT);
+	}
 }

@@ -8,6 +8,8 @@ public enum GamePhase {
 	WAITING_HUMAN,
 	/** 等待狗选择类型。 */
 	WAITING_DOGS,
+	/** 游戏进行中参与者掉线，暂停世界等他回来。 */
+	WAITING_PARTNER,
 	/** 重生倒计时（世界暂停）。 */
 	COUNTDOWN,
 	/** 正常进行中。 */

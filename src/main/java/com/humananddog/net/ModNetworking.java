@@ -2,6 +2,7 @@ package com.humananddog.net;
 
 import com.humananddog.mechanic.DogMechanic;
 import com.humananddog.net.payload.BarkPayload;
+import com.humananddog.net.payload.ClearDogVisualPayload;
 import com.humananddog.net.payload.DogVisualPayload;
 import com.humananddog.net.payload.GameStatePayload;
 import com.humananddog.net.payload.OpenDogAgeScreenPayload;
@@ -33,6 +34,7 @@ public final class ModNetworking {
 		PayloadTypeRegistry.clientboundPlay().register(GameStatePayload.TYPE, GameStatePayload.CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(DogVisualPayload.TYPE, DogVisualPayload.CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(RoleStatePayload.TYPE, RoleStatePayload.CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(ClearDogVisualPayload.TYPE, ClearDogVisualPayload.CODEC);
 		// 客户端 -> 服务端
 		PayloadTypeRegistry.serverboundPlay().register(SelectRolePayload.TYPE, SelectRolePayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(SelectDogAgePayload.TYPE, SelectDogAgePayload.CODEC);

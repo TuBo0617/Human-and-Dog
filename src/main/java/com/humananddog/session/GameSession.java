@@ -2,11 +2,14 @@ package com.humananddog.session;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import com.humananddog.HumanAndDogMod;
+import com.humananddog.net.payload.ClearDogVisualPayload;
 import com.humananddog.net.payload.DogVisualPayload;
 import com.humananddog.net.payload.GameStatePayload;
 import com.humananddog.net.payload.OpenDogAgeScreenPayload;
@@ -26,6 +29,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.ai.attributes.AttributeInstance;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -62,6 +67,8 @@ public class GameSession {
 	private int visualResyncTicks;
 	/** 死亡倒计时期间全员定格的位置。 */
 	private final Map<UUID, FrozenSpot> freezeSpots = new HashMap<>();
+	/** 掉线中的参与者：这些人回来之前，掉线等待阶段不会结束。 */
+	private final Set<UUID> offlineParticipants = new HashSet<>();
 
 	private record FrozenSpot(ServerLevel level, double x, double y, double z) {
 	}
@@ -206,15 +213,34 @@ public class GameSession {
 		return humanId == null ? null : server.getPlayerList().getPlayer(humanId);
 	}
 
+	/**
+	 * 在线的狗。
+	 *
+	 * <p>以"玩家角色数据"为准，而不是 {@code dogIds} 这个缓存索引：
+	 * 索引一旦和真实角色不同步（读档、身份互换、旧存档里残留的 UUID 都可能造成），
+	 * 这里就会永远返回空列表，{@code recheckStart} 于是认为"狗还没到"，
+	 * 所有人卡在"等待其他玩家加入"——这正是读档后狗进来却开不了局的根因。
+	 */
 	public List<ServerPlayer> dogs() {
 		List<ServerPlayer> result = new ArrayList<>();
-		for (UUID id : dogIds) {
-			ServerPlayer p = server.getPlayerList().getPlayer(id);
-			if (p != null) {
+		for (ServerPlayer p : server.getPlayerList().getPlayers()) {
+			PlayerData d = players.get(p.getUUID());
+			if (d != null && d.role == Role.DOG) {
 				result.add(p);
 			}
 		}
 		return result;
+	}
+
+	/** 当前被占用的某个身份数量（含离线玩家，用于判断名额）。 */
+	public int roleCount(Role role) {
+		int count = 0;
+		for (PlayerData d : players.values()) {
+			if (d.role == role) {
+				count++;
+			}
+		}
+		return count;
 	}
 
 	public List<ServerPlayer> allParticipants() {
@@ -237,6 +263,8 @@ public class GameSession {
 
 	public void onJoin(ServerPlayer player) {
 		UUID id = player.getUUID();
+		// 回来的人从"掉线名单"里移除，等待阶段据此判断能不能继续
+		offlineParticipants.remove(id);
 		PlayerData data = players.computeIfAbsent(id, PlayerData::new);
 
 		// 房主 ID 必须对应一个真实的"人"：存档里 humanId 有值但那份玩家数据已丢失时清空，
@@ -272,6 +300,11 @@ public class GameSession {
 				dogIds.remove(id);
 			}
 			if (data.role == Role.DOG) {
+				// 索引兜底：无论读档 / 重连走了哪条路径，都要保证狗在名单里，
+				// 否则后面按名单判断"狗是否到齐"的旧逻辑会一直认为它没来。
+				if (!dogIds.contains(id)) {
+					dogIds.add(id);
+				}
 				com.humananddog.mechanic.DogMechanic.setupDog(player);
 				if (!data.wolfArmor.isEmpty()) {
 					com.humananddog.mechanic.DogMechanic.applyArmorModifier(player, true);
@@ -322,14 +355,16 @@ public class GameSession {
 			}
 			// 第一位玩家（房主）：弹出角色选择
 			setPhase(GamePhase.WAITING_HUMAN);
+			// 先同步"哪些身份已被占用"，再开界面：否则新玩家会在角色界面里
+			// 看到人 / 狗两个按钮都是可点的，点下去才被服务端拒绝。
+			syncRoleState();
 			syncTo(player);
 			ServerPlayNetworking.send(player, new OpenRoleScreenPayload());
-			syncRoleState();
 		} else if (isRoleAvailable(Role.HUMAN) || isRoleAvailable(Role.DOG)) {
 			// 还有空位：让新玩家自己选（已被占用的身份在界面上置灰）
+			syncRoleState();
 			syncTo(player);
 			ServerPlayNetworking.send(player, new OpenRoleScreenPayload());
-			syncRoleState();
 		} else {
 			// 人狗都已就位：后来者自动进入观战
 			assignSpectator(player);
@@ -337,7 +372,23 @@ public class GameSession {
 	}
 
 	public void onLeave(ServerPlayer player) {
-		// 保留数据以便重连；若永久退出则在会话结束时清理
+		PlayerData data = players.get(player.getUUID());
+		if (data == null || !data.role.isParticipant()) {
+			// 观战者 / 还没选身份的人离开，不影响正在进行的一局
+			return;
+		}
+		if (phase != GamePhase.PLAYING) {
+			// 等待阶段本来就停着；倒计时期间让倒计时自己走完，不打断
+			return;
+		}
+		// 参与者掉线：暂停世界并显示开局同款等待界面，等他回来继续。
+		// 不重新传送、不重置出生点，回来的人会被 recheckStart 直接接回 PLAYING。
+		// 用显式的"掉线名单"判断，避免依赖玩家列表的移除时机（DISCONNECT 时可能还没移除）。
+		offlineParticipants.add(player.getUUID());
+		setPhase(GamePhase.WAITING_PARTNER);
+		HumanAndDogMod.LOGGER.info("参与者 {} 离开，暂停等待其回来", player.getName().getString());
+		syncAll();
+		save();
 	}
 
 	/** 按玩家数据重建狗列表，清掉已经不再是狗的 UUID。 */
@@ -357,7 +408,7 @@ public class GameSession {
 	public boolean isRoleAvailable(Role role) {
 		return switch (role) {
 			case HUMAN -> humanId == null;
-			case DOG -> dogIds.size() < MAX_PARTICIPANTS - 1;
+			case DOG -> roleCount(Role.DOG) < MAX_PARTICIPANTS - 1;
 			case SPECTATOR -> true;
 			default -> false;
 		};
@@ -516,6 +567,238 @@ public class GameSession {
 		save();
 	}
 
+	// ---------------------------------------------------------------------
+	// 身份变更（/hd role、/hd swap、/hd age）
+	// ---------------------------------------------------------------------
+
+	/** 身份切换的结果。 */
+	public enum RoleChangeResult {
+		/** 切换成功。 */
+		OK,
+		/** 游戏已经开始，不允许再改。 */
+		LOCKED,
+		/** 目标身份已经被别人占了。 */
+		TAKEN
+	}
+
+	/**
+	 * 等待阶段修改自己的身份（{@code /hd role}）。
+	 * 人和狗各只有一个名额：目标身份被别人占用时返回 {@link RoleChangeResult#TAKEN}；
+	 * 开局之后（PLAYING / COUNTDOWN）返回 {@link RoleChangeResult#LOCKED}。
+	 */
+	public RoleChangeResult changeOwnRole(ServerPlayer player, Role target) {
+		if (phase == GamePhase.PLAYING || phase == GamePhase.COUNTDOWN) {
+			return RoleChangeResult.LOCKED;
+		}
+		PlayerData data = data(player);
+		if (data == null) {
+			return RoleChangeResult.LOCKED;
+		}
+		UUID id = player.getUUID();
+		if (data.role == target) {
+			syncTo(player);
+			syncRoleState();
+			return RoleChangeResult.OK;
+		}
+		switch (target) {
+			case HUMAN -> {
+				if (humanId != null && !humanId.equals(id)) {
+					return RoleChangeResult.TAKEN;
+				}
+				leaveDogRole(player, data);
+				spectatorIds.remove(id);
+				data.role = Role.HUMAN;
+				humanId = id;
+				player.setGameMode(GameType.SURVIVAL);
+				applyHumanBody(player);
+				setPhase(GamePhase.WAITING_DOGS);
+				HumanAndDogMod.LOGGER.info("{} 通过指令改为当人", player.getName().getString());
+			}
+			case DOG -> {
+				if (roleCount(Role.DOG) > 0 && !isDog(id)) {
+					return RoleChangeResult.TAKEN;
+				}
+				if (isHuman(id)) {
+					humanId = null;
+				}
+				spectatorIds.remove(id);
+				data.role = Role.DOG;
+				if (!dogIds.contains(id)) {
+					dogIds.add(id);
+				}
+				player.setGameMode(GameType.SURVIVAL);
+				com.humananddog.mechanic.DogMechanic.setupDog(player);
+				if (!data.wolfArmor.isEmpty()) {
+					com.humananddog.mechanic.DogMechanic.applyArmorModifier(player, true);
+				}
+				player.refreshDimensions();
+				if (!data.ageConfirmed) {
+					ServerPlayNetworking.send(player, new OpenDogAgeScreenPayload());
+				} else if (!data.variantConfirmed) {
+					ServerPlayNetworking.send(player, new OpenDogVariantScreenPayload());
+				} else {
+					broadcastDogVisual(player);
+				}
+				setPhase(GamePhase.WAITING_DOGS);
+				HumanAndDogMod.LOGGER.info("{} 通过指令改为当狗", player.getName().getString());
+			}
+			case SPECTATOR -> {
+				if (isHuman(id)) {
+					humanId = null;
+				}
+				leaveDogRole(player, data);
+				data.role = Role.SPECTATOR;
+				if (!spectatorIds.contains(id)) {
+					spectatorIds.add(id);
+				}
+				player.setGameMode(GameType.SPECTATOR);
+				player.sendSystemMessage(Component.translatable("human-and-dog.message.spectator"));
+				setPhase(humanId == null && dogIds.isEmpty() ? GamePhase.WAITING_HUMAN : GamePhase.WAITING_DOGS);
+				HumanAndDogMod.LOGGER.info("{} 通过指令改为观战者", player.getName().getString());
+			}
+			default -> {
+				return RoleChangeResult.LOCKED;
+			}
+		}
+		syncRoleState();
+		syncAll();
+		// 身份都变了，之前"等某个人回来"的前提不再成立：清掉掉线名单，按新阵容重新评估
+		offlineParticipants.clear();
+		recheckStart();
+		save();
+		return RoleChangeResult.OK;
+	}
+
+	/** {@code /hd age}：让狗重新走一遍"年龄 → 类型"的选择流程。 */
+	public void beginDogReconfigure(ServerPlayer dog) {
+		PlayerData data = data(dog);
+		if (data == null || data.role != Role.DOG) {
+			return;
+		}
+		// 把两个"已确认"标记清掉，selectDogAge / selectVariant 才会接受这次重选
+		data.ageConfirmed = false;
+		data.variantConfirmed = false;
+		save();
+		ServerPlayNetworking.send(dog, new OpenDogAgeScreenPayload());
+	}
+
+	/**
+	 * {@code /hd swap}：人和狗都在线时互换身份。
+	 * 狗的外观（变种、项圈、狼铠、年龄）整套搬给新狗，原来的人恢复成 20 血的普通人。
+	 */
+	public boolean swapHumanAndDog() {
+		ServerPlayer human = human();
+		List<ServerPlayer> onlineDogs = dogs();
+		if (human == null || onlineDogs.isEmpty()) {
+			return false;
+		}
+		ServerPlayer dog = onlineDogs.get(0);
+		UUID humanUuid = human.getUUID();
+		UUID dogUuid = dog.getUUID();
+		PlayerData humanData = players.get(humanUuid);
+		PlayerData dogData = players.get(dogUuid);
+		if (humanData == null || dogData == null) {
+			return false;
+		}
+		// 先把狗的整套数据搬给原来的人，再把角色对调
+		copyDogFields(dogData, humanData);
+		humanData.role = Role.DOG;
+		dogData.role = Role.HUMAN;
+		humanId = dogUuid;
+		dogIds.clear();
+		dogIds.add(humanUuid);
+		spectatorIds.remove(humanUuid);
+		spectatorIds.remove(dogUuid);
+
+		// 新狗
+		com.humananddog.mechanic.DogMechanic.setupDog(human);
+		if (!humanData.wolfArmor.isEmpty()) {
+			com.humananddog.mechanic.DogMechanic.applyArmorModifier(human, true);
+		}
+		human.refreshDimensions();
+		human.setGameMode(GameType.SURVIVAL);
+		// 新人
+		clearDogFields(dogData);
+		applyHumanBody(dog);
+		dog.setGameMode(GameType.SURVIVAL);
+
+		// 原来那只狗现在是人了：先让客户端把它的狼外观删掉
+		broadcastClearDogVisual(dogUuid);
+		broadcastDogVisual(human);
+		offlineParticipants.clear();
+		syncRoleState();
+		syncAll();
+		save();
+		return true;
+	}
+
+	/** 退出狗的身份：收回狼铠加成、清掉坐姿，并通知客户端别再把这个人画成狼。 */
+	private void leaveDogRole(ServerPlayer player, PlayerData data) {
+		if (dogIds.remove(player.getUUID())) {
+			com.humananddog.mechanic.DogMechanic.applyArmorModifier(player, false);
+			broadcastClearDogVisual(player.getUUID());
+		}
+		if (data.role == Role.DOG) {
+			data.sitting = false;
+			data.sitPosSet = false;
+		}
+	}
+
+	/** 告诉所有客户端：这个 UUID 已经不是狗了。 */
+	private void broadcastClearDogVisual(UUID id) {
+		ClearDogVisualPayload payload = new ClearDogVisualPayload(id.toString());
+		for (ServerPlayer p : PlayerLookup.all(server)) {
+			ServerPlayNetworking.send(p, payload);
+		}
+	}
+
+	/** 把玩家身体恢复成"人"：20 血上限、去掉狼铠护甲、碰撞箱回到玩家尺寸。 */
+	private void applyHumanBody(ServerPlayer player) {
+		AttributeInstance health = player.getAttribute(Attributes.MAX_HEALTH);
+		if (health != null) {
+			health.setBaseValue(20.0);
+		}
+		if (player.getHealth() > 20.0F) {
+			player.setHealth(20.0F);
+		}
+		com.humananddog.mechanic.DogMechanic.applyArmorModifier(player, false);
+		player.refreshDimensions();
+	}
+
+	/** 复制狗相关字段（互换身份时用）。 */
+	private static void copyDogFields(PlayerData from, PlayerData to) {
+		to.dogVariant = from.dogVariant;
+		to.variantConfirmed = from.variantConfirmed;
+		to.collarColor = from.collarColor;
+		to.wolfArmor = from.wolfArmor.isEmpty() ? ItemStack.EMPTY : from.wolfArmor.copy();
+		to.sitting = false;
+		to.sitPosSet = false;
+		to.baby = from.baby;
+		to.ageConfirmed = from.ageConfirmed;
+		to.ageLocked = from.ageLocked;
+		to.growthTicks = from.growthTicks;
+		to.loveTicks = 0;
+		to.breedTicks = 0;
+		to.breedCooldown = from.breedCooldown;
+	}
+
+	/** 清空狗相关字段（变成人之后，下次当狗需要重新选年龄和类型）。 */
+	private static void clearDogFields(PlayerData data) {
+		data.dogVariant = "";
+		data.variantConfirmed = false;
+		data.collarColor = "red";
+		data.wolfArmor = ItemStack.EMPTY;
+		data.sitting = false;
+		data.sitPosSet = false;
+		data.baby = false;
+		data.ageConfirmed = false;
+		data.ageLocked = false;
+		data.growthTicks = 0;
+		data.loveTicks = 0;
+		data.breedTicks = 0;
+		data.breedCooldown = 0;
+	}
+
 	/**
 	 * 重新评估"现在能不能开局 / 继续游戏"。
 	 * 该方法是幂等的，等待阶段每个 tick 都会被 {@link #tickAlways()} 调用一次。
@@ -524,35 +807,43 @@ public class GameSession {
 		if (phase == GamePhase.PLAYING || phase == GamePhase.COUNTDOWN) {
 			return;
 		}
-		// 还没人当人：没有狗时停在房主选角色界面，已经有狗时等第二个玩家来当人
-		if (humanId == null) {
-			setPhase(dogIds.isEmpty() ? GamePhase.WAITING_HUMAN : GamePhase.WAITING_DOGS);
-			syncIfChanged();
+		// 掉线等待：人和狗都回来了就继续（不重新开局、不传送）
+		if (phase == GamePhase.WAITING_PARTNER) {
+			if (offlineParticipants.isEmpty() && human() != null && !dogs().isEmpty()) {
+				setPhase(GamePhase.PLAYING);
+				HumanAndDogMod.LOGGER.info("人狗同行：伙伴已回来，继续游戏");
+				syncAll();
+				save();
+			} else {
+				syncIfChanged();
+			}
 			return;
 		}
-		if (dogIds.isEmpty()) {
+		// 还没人当人：没有狗时停在房主选角色界面，已经有狗时等第二个玩家来当人
+		if (humanId == null) {
+			stayWaiting(roleCount(Role.DOG) == 0 ? GamePhase.WAITING_HUMAN : GamePhase.WAITING_DOGS, "还没有人");
+			return;
+		}
+		if (roleCount(Role.DOG) == 0) {
 			if (com.humananddog.dev.DevFlags.SOLO && human() != null) {
 				// 开发自测：单人没有狗也直接开局，用于验证开局流程与存档写盘
 				startGame();
 				return;
 			}
-			setPhase(GamePhase.WAITING_DOGS);
-			syncIfChanged();
+			stayWaiting(GamePhase.WAITING_DOGS, "还没有狗");
 			return;
 		}
 		// 狗已就绪但人不在线（掉线 / 还没回来）：保持等待
 		ServerPlayer human = human();
 		if (human == null) {
-			setPhase(GamePhase.WAITING_DOGS);
-			syncIfChanged();
+			stayWaiting(GamePhase.WAITING_DOGS, "人不在线");
 			return;
 		}
 		// 只要求"在线"的狗已确认变种：存档里已离线、再也不会回来的旧狗
 		// 不应该把整局永久卡死在等待界面（原实现按 dogIds 全量判断，离线即死锁）。
 		List<ServerPlayer> onlineDogs = dogs();
 		if (onlineDogs.isEmpty()) {
-			setPhase(GamePhase.WAITING_DOGS);
-			syncIfChanged();
+			stayWaiting(GamePhase.WAITING_DOGS, "狗不在线");
 			return;
 		}
 		boolean allConfirmed = true;
@@ -564,8 +855,7 @@ public class GameSession {
 			}
 		}
 		if (!allConfirmed) {
-			setPhase(GamePhase.WAITING_DOGS);
-			syncIfChanged();
+			stayWaiting(GamePhase.WAITING_DOGS, "狗还没确认类型");
 			return;
 		}
 		if (loadedFromSave) {
@@ -578,6 +868,25 @@ public class GameSession {
 			return;
 		}
 		startGame();
+	}
+
+	/** 上一次停在等待的原因，避免暂停期间每个 tick 刷同一条日志。 */
+	private String lastWaitReason;
+
+	/**
+	 * 停在等待阶段，并把"为什么还没开局"记一条日志（只在原因变化时输出）。
+	 * 读档后卡在等待界面时，看这条日志就能知道是缺人、缺狗，还是狗没确认类型。
+	 */
+	private void stayWaiting(GamePhase next, String reason) {
+		if (!reason.equals(lastWaitReason)) {
+			lastWaitReason = reason;
+			HumanAndDogMod.LOGGER.info("[人狗同行] 停在等待：{}｜人={} 狗名单={} 在线狗={} 读档恢复={}",
+				reason,
+				humanId == null ? "无" : (human() != null ? "在线" : "离线"),
+				dogIds.size(), dogs().size(), loadedFromSave);
+		}
+		setPhase(next);
+		syncIfChanged();
 	}
 
 	/** 切换阶段（只在真正变化时记录日志）。 */
@@ -731,7 +1040,7 @@ public class GameSession {
 	 * 否则阶段一旦停在等待（旧实现里 assignDog / 存档恢复都可能停在那里）就永远出不来。
 	 */
 	public void tickAlways() {
-		if (phase == GamePhase.WAITING_DOGS) {
+		if (phase == GamePhase.WAITING_DOGS || phase == GamePhase.WAITING_PARTNER) {
 			recheckStart();
 		}
 	}

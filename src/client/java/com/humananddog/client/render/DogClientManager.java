@@ -35,8 +35,12 @@ import net.minecraft.world.item.Items;
 public final class DogClientManager {
 	private static final Map<UUID, DummyWolf> WOLVES = new HashMap<>();
 	private static int nextId = -900000;
+	/** 骑乘时替身狼相对载具原点的抬高量（船内地面大约在这个高度）。 */
+	private static final double RIDING_WOLF_Y_OFFSET = 0.1;
 	/** 当前替身狼所属的客户端世界；维度切换后 ClientLevel 会被整体替换。 */
 	private static ClientLevel currentLevel;
+	/** 上一帧本地玩家是不是狗，用于"刚变成狗"时切一次视角。 */
+	private static boolean wasLocalDog;
 
 	private DogClientManager() {
 	}
@@ -77,15 +81,13 @@ public final class DogClientManager {
 			mc.gui.setScreen(null);
 		}
 
-		// 狗视角：默认第三人称（在狗身后上方看狼），F6 后第一人称低视角
-		if (ClientState.isDog(mc.player.getUUID())) {
-			CameraType desired = ClientState.dogLowCamera
-				? CameraType.FIRST_PERSON
-				: CameraType.THIRD_PERSON_BACK;
-			if (mc.options.getCameraType() != desired) {
-				mc.options.setCameraType(desired);
-			}
+		// 狗视角：刚变成狗时切到第三人称背面（能看到替身狼），之后交给原版 F5
+		// 在第一人称 / 第三人称背面 / 第三人称正面之间循环，这里不再每帧覆盖。
+		boolean localIsDog = ClientState.isDog(mc.player.getUUID());
+		if (localIsDog && !wasLocalDog) {
+			mc.options.setCameraType(CameraType.THIRD_PERSON_BACK);
 		}
+		wasLocalDog = localIsDog;
 
 		Set<UUID> present = new HashSet<>();
 
@@ -134,24 +136,27 @@ public final class DogClientManager {
 	}
 
 	private static void sync(DummyWolf wolf, Player player, ClientState.DogVisual visual, Player human) {
-		// 位置 / 朝向（连同旧位置一起设，避免实体插值产生的滑动）
+		// 骑乘时水平坐标取玩家自己：那正是船上的座位坐标（船长在前座、乘客在后座，各自不同），
+		// 之前用船体中心会把当乘客的狗顶到船头去。纵向仍取载具坐标 + 船内地面高度，
+		// 因为玩家的座位比船底高一截，直接用会让狼悬在船沿上。
+		boolean riding = player.isPassenger() && player.getVehicle() != null;
+		net.minecraft.world.entity.Entity vehicle = riding ? player.getVehicle() : null;
 		double x = player.getX();
-		double y = player.getY();
 		double z = player.getZ();
+		double y = riding ? vehicle.getY() + RIDING_WOLF_Y_OFFSET : player.getY();
 		wolf.setPos(x, y, z);
-		// 把"上一帧位置/朝向"全部对齐狗玩家：渲染插值（xOld/yOld/zOld、yRotO…）与
-		// 走路动画（xo/yo/zo）都以玩家的真实位移为准，否则替身狼会比玩家慢一帧（抖动）。
+		// 插值的"上一帧坐标"必须和当前位置取自同一个来源，否则渲染会在两套坐标之间插值（抖动）。
 		wolf.xo = player.xo;
-		wolf.yo = player.yo;
+		wolf.yo = riding ? vehicle.yo + RIDING_WOLF_Y_OFFSET : player.yo;
 		wolf.zo = player.zo;
 		wolf.xOld = player.xOld;
-		wolf.yOld = player.yOld;
+		wolf.yOld = riding ? vehicle.yOld + RIDING_WOLF_Y_OFFSET : player.yOld;
 		wolf.zOld = player.zOld;
 		wolf.yRotO = player.yRotO;
 		wolf.xRotO = player.xRotO;
 		wolf.yHeadRotO = player.yHeadRotO;
 		// 狗坐在船/矿车里时不该继续摆腿：把位移清零，让摆腿速度平滑衰减到 0。
-		if (player.isPassenger()) {
+		if (riding) {
 			wolf.xo = x;
 			wolf.yo = y;
 			wolf.zo = z;
@@ -160,6 +165,8 @@ public final class DogClientManager {
 		// 里推进 walkAnimation，而那一刻狼的位置还没被搬运（位移恒为 0），所以四肢永远不动。
 		// DummyWolf 屏蔽了原版那次调用，这里改用玩家这一 tick 的真实位移驱动。
 		wolf.updateWalkAnimationFromPlayer();
+		// 上岸甩水：原版 Wolf 的触发逻辑在服务端分支里，替身狼是纯客户端实体，自己驱动一次
+		wolf.tickShake(player.isInWaterOrRain(), player.onGround());
 		wolf.setYRot(player.getYRot());
 		wolf.setXRot(player.getXRot());
 		wolf.setYHeadRot(player.getYHeadRot());
@@ -169,11 +176,10 @@ public final class DogClientManager {
 		// 完全无碰撞，避免替身狼与狗玩家重叠时互相推挤造成漂移
 		wolf.noPhysics = true;
 
-		// 本地狗在 F6 第一人称低视角时隐藏自己的替身狼（否则相机会落进狼模型内部）。
+		// 本地狗在第一人称时隐藏自己的替身狼（否则相机会落进狼模型内部）。
 		// 狗本体是否渲染由 DogInvisibleMixin 统一控制（覆盖 isInvisible），这里不再动 setInvisible，
 		// 避免与服务端同步的隐形标志打架产生"蹲下闪人形"。
 		boolean selfFirstPerson = player == Minecraft.getInstance().player
-			&& ClientState.dogLowCamera
 			&& Minecraft.getInstance().options.getCameraType().isFirstPerson();
 		wolf.setInvisible(selfFirstPerson);
 

@@ -1,7 +1,5 @@
 {
 	"key.category.human-and-dog.keys": "Human and Dog",
-	"key.categories.human-and-dog": "Human and Dog",
-	"key.human-and-dog.dog_camera": "Toggle dog's low camera",
 	"key.human-and-dog.bark": "Bark",
 
 	"human-and-dog.screen.role.title": "Choose your role",
@@ -29,5 +27,19 @@
 	"human-and-dog.variant.striped": "Striped wolf",
 
 	"human-and-dog.message.welcome": "Welcome to the game!!!",
-	"human-and-dog.message.spectator": "The human and the dog are ready - you are watching."
+	"human-and-dog.message.spectator": "The human and the dog are ready - you are watching.",
+
+	"human-and-dog.role.human": "human",
+	"human-and-dog.role.dog": "dog",
+	"human-and-dog.role.spectator": "spectator",
+	"human-and-dog.role.none": "unassigned",
+
+	"human-and-dog.command.role.success": "Your role is now: %s",
+	"human-and-dog.command.role.taken": "That role is already taken: %s",
+	"human-and-dog.command.role.locked": "The game has already started - roles are locked",
+	"human-and-dog.command.role.invalid": "Unknown role: %s (use human / dog / spectator)",
+	"human-and-dog.command.age.only_dog": "Only the dog can use this command",
+	"human-and-dog.command.age.ok": "Pick a puppy or an adult, then pick a variant",
+	"human-and-dog.command.swap.need_both": "Both the human and the dog must be online",
+	"human-and-dog.command.swap.done": "Swapped the human and the dog"
 }
