@@ -4,7 +4,7 @@
 > Ready-to-paste listing copy for both platforms (EN + ZH).
 
 - Mod id：`human-and-dog`
-- 版本：`1.4.0`
+- 版本：`1.4.1`
 - 支持：Minecraft **26.3** / Fabric Loader **≥ 0.19.5** / Java **25**
 - 依赖：**Fabric API**（同游戏版本，必装）
 - 许可证：**CC0-1.0**
@@ -168,9 +168,17 @@ English and Simplified Chinese are bundled. Other locales fall back to English.
 > 两个平台都支持 `Modrinth/CurseForge 项目关系`：把 **Fabric API** 标成 Required dependency，
 > 加载器标 Fabric，环境标 Client+Server。
 
-## 5. 更新日志 / Changelog (1.4.0)
+## 5. 更新日志 / Changelog (1.4.1)
 
 ```markdown
+### 1.4.1 — hotfix
+
+**Fixed**
+- Jade and other WAILA-style mods could not show the dog's health, effects or status at all:
+  the dog player was filtered out as an invisible entity, so the crosshair never locked onto it.
+- The dog's player body was drawn as a translucent ghost on top of the wolf when something
+  (such as an info mod) forced it to be considered visible.
+
 ### 1.4.0 — commands, camera and a calmer ride
 
 **Added**
@@ -238,6 +246,13 @@ English and Simplified Chinese are bundled. Other locales fall back to English.
 - zh_cn + en_us localisation
 ```
 ```markdown
+### 1.4.1 — 热修复
+
+**修复**
+- Jade（玉）等信息显示 mod 完全无法显示狗的血量、药水效果与状态：狗玩家被当成隐形实体过滤掉了，
+  准星永远锁定不到它。
+- 狗玩家的本体被以半透明幽灵的形式叠加画在替身狼上（凡是让它"被视为可见"的场景都会触发）。
+
 ### 1.4.0 — 指令、视角与更稳的骑乘
 
 **新增**
