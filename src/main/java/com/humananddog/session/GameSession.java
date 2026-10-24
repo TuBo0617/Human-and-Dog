@@ -2,13 +2,19 @@ package com.humananddog.session;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import com.humananddog.HumanAndDogMod;
+import com.humananddog.net.payload.ClearDogVisualPayload;
+import com.humananddog.net.payload.DiscPayload;
+import com.humananddog.net.payload.DogBlocksPayload;
 import com.humananddog.net.payload.DogVisualPayload;
 import com.humananddog.net.payload.GameStatePayload;
+import com.humananddog.net.payload.OpenDogAgeScreenPayload;
 import com.humananddog.net.payload.OpenDogVariantScreenPayload;
 import com.humananddog.net.payload.OpenRoleScreenPayload;
 import com.humananddog.net.payload.RoleStatePayload;
@@ -22,9 +28,12 @@ import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.GlobalPos;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.ai.attributes.AttributeInstance;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -61,6 +70,8 @@ public class GameSession {
 	private int visualResyncTicks;
 	/** 死亡倒计时期间全员定格的位置。 */
 	private final Map<UUID, FrozenSpot> freezeSpots = new HashMap<>();
+	/** 掉线中的参与者：这些人回来之前，掉线等待阶段不会结束。 */
+	private final Set<UUID> offlineParticipants = new HashSet<>();
 
 	private record FrozenSpot(ServerLevel level, double x, double y, double z) {
 	}
@@ -98,6 +109,14 @@ public class GameSession {
 			data.dogVariant = sp.dogVariant();
 			data.variantConfirmed = sp.variantConfirmed();
 			data.collarColor = sp.collarColor();
+			data.baby = sp.baby();
+			data.ageConfirmed = true;
+			data.ageLocked = sp.ageLocked();
+			data.growthTicks = sp.growthTicks();
+			data.leftBlock = sp.leftBlock();
+			data.rightBlock = sp.rightBlock();
+			data.leftItems = new ArrayList<>(sp.leftItems());
+			data.rightItems = new ArrayList<>(sp.rightItems());
 			if (sp.hasArmor()) {
 				data.wolfArmor = new ItemStack(Items.WOLF_ARMOR);
 			}
@@ -140,7 +159,14 @@ public class GameSession {
 				d.dogVariant,
 				d.variantConfirmed,
 				d.collarColor,
-				!d.wolfArmor.isEmpty()
+				!d.wolfArmor.isEmpty(),
+				d.baby,
+				d.ageLocked,
+				d.growthTicks,
+				d.leftBlock,
+				d.rightBlock,
+				d.leftItems,
+				d.rightItems
 			));
 		}
 		saveData.players = map;
@@ -198,15 +224,34 @@ public class GameSession {
 		return humanId == null ? null : server.getPlayerList().getPlayer(humanId);
 	}
 
+	/**
+	 * 在线的狗。
+	 *
+	 * <p>以"玩家角色数据"为准，而不是 {@code dogIds} 这个缓存索引：
+	 * 索引一旦和真实角色不同步（读档、身份互换、旧存档里残留的 UUID 都可能造成），
+	 * 这里就会永远返回空列表，{@code recheckStart} 于是认为"狗还没到"，
+	 * 所有人卡在"等待其他玩家加入"——这正是读档后狗进来却开不了局的根因。
+	 */
 	public List<ServerPlayer> dogs() {
 		List<ServerPlayer> result = new ArrayList<>();
-		for (UUID id : dogIds) {
-			ServerPlayer p = server.getPlayerList().getPlayer(id);
-			if (p != null) {
+		for (ServerPlayer p : server.getPlayerList().getPlayers()) {
+			PlayerData d = players.get(p.getUUID());
+			if (d != null && d.role == Role.DOG) {
 				result.add(p);
 			}
 		}
 		return result;
+	}
+
+	/** 当前被占用的某个身份数量（含离线玩家，用于判断名额）。 */
+	public int roleCount(Role role) {
+		int count = 0;
+		for (PlayerData d : players.values()) {
+			if (d.role == role) {
+				count++;
+			}
+		}
+		return count;
 	}
 
 	public List<ServerPlayer> allParticipants() {
@@ -229,6 +274,8 @@ public class GameSession {
 
 	public void onJoin(ServerPlayer player) {
 		UUID id = player.getUUID();
+		// 回来的人从"掉线名单"里移除，等待阶段据此判断能不能继续
+		offlineParticipants.remove(id);
 		PlayerData data = players.computeIfAbsent(id, PlayerData::new);
 
 		// 房主 ID 必须对应一个真实的"人"：存档里 humanId 有值但那份玩家数据已丢失时清空，
@@ -264,15 +311,26 @@ public class GameSession {
 				dogIds.remove(id);
 			}
 			if (data.role == Role.DOG) {
+				// 索引兜底：无论读档 / 重连走了哪条路径，都要保证狗在名单里，
+				// 否则后面按名单判断"狗是否到齐"的旧逻辑会一直认为它没来。
+				if (!dogIds.contains(id)) {
+					dogIds.add(id);
+				}
 				com.humananddog.mechanic.DogMechanic.setupDog(player);
 				if (!data.wolfArmor.isEmpty()) {
 					com.humananddog.mechanic.DogMechanic.applyArmorModifier(player, true);
 				}
-				if (!data.variantConfirmed) {
+				// 重连 / 恢复存档后同样要套用狗的小碰撞箱
+				player.refreshDimensions();
+				// 流程：先选年龄（小狗 / 成年狗），再选狼变种
+				if (!data.ageConfirmed) {
+					ServerPlayNetworking.send(player, new OpenDogAgeScreenPayload());
+				} else if (!data.variantConfirmed) {
 					ServerPlayNetworking.send(player, new OpenDogVariantScreenPayload());
 				}
 			}
 			syncAllDogVisualsTo(player);
+			sendAllDogBlocksTo(player);
 			if (data.role == Role.DOG) {
 				broadcastDogVisual(player);
 			}
@@ -291,6 +349,7 @@ public class GameSession {
 				}
 				data.dogVariant = "minecraft:pale";
 				data.variantConfirmed = true;
+				data.ageConfirmed = true;
 				com.humananddog.mechanic.DogMechanic.setupDog(player);
 				sharedRespawn = GlobalPos.of(player.level().dimension(),
 					BlockPos.containing(player.getX(), player.getY(), player.getZ()));
@@ -308,14 +367,16 @@ public class GameSession {
 			}
 			// 第一位玩家（房主）：弹出角色选择
 			setPhase(GamePhase.WAITING_HUMAN);
+			// 先同步"哪些身份已被占用"，再开界面：否则新玩家会在角色界面里
+			// 看到人 / 狗两个按钮都是可点的，点下去才被服务端拒绝。
+			syncRoleState();
 			syncTo(player);
 			ServerPlayNetworking.send(player, new OpenRoleScreenPayload());
-			syncRoleState();
 		} else if (isRoleAvailable(Role.HUMAN) || isRoleAvailable(Role.DOG)) {
 			// 还有空位：让新玩家自己选（已被占用的身份在界面上置灰）
+			syncRoleState();
 			syncTo(player);
 			ServerPlayNetworking.send(player, new OpenRoleScreenPayload());
-			syncRoleState();
 		} else {
 			// 人狗都已就位：后来者自动进入观战
 			assignSpectator(player);
@@ -323,7 +384,23 @@ public class GameSession {
 	}
 
 	public void onLeave(ServerPlayer player) {
-		// 保留数据以便重连；若永久退出则在会话结束时清理
+		PlayerData data = players.get(player.getUUID());
+		if (data == null || !data.role.isParticipant()) {
+			// 观战者 / 还没选身份的人离开，不影响正在进行的一局
+			return;
+		}
+		if (phase != GamePhase.PLAYING) {
+			// 等待阶段本来就停着；倒计时期间让倒计时自己走完，不打断
+			return;
+		}
+		// 参与者掉线：暂停世界并显示开局同款等待界面，等他回来继续。
+		// 不重新传送、不重置出生点，回来的人会被 recheckStart 直接接回 PLAYING。
+		// 用显式的"掉线名单"判断，避免依赖玩家列表的移除时机（DISCONNECT 时可能还没移除）。
+		offlineParticipants.add(player.getUUID());
+		setPhase(GamePhase.WAITING_PARTNER);
+		HumanAndDogMod.LOGGER.info("参与者 {} 离开，暂停等待其回来", player.getName().getString());
+		syncAll();
+		save();
 	}
 
 	/** 按玩家数据重建狗列表，清掉已经不再是狗的 UUID。 */
@@ -343,7 +420,7 @@ public class GameSession {
 	public boolean isRoleAvailable(Role role) {
 		return switch (role) {
 			case HUMAN -> humanId == null;
-			case DOG -> dogIds.size() < MAX_PARTICIPANTS - 1;
+			case DOG -> roleCount(Role.DOG) < MAX_PARTICIPANTS - 1;
 			case SPECTATOR -> true;
 			default -> false;
 		};
@@ -399,10 +476,15 @@ public class GameSession {
 		if (!data.wolfArmor.isEmpty()) {
 			com.humananddog.mechanic.DogMechanic.applyArmorModifier(player, true);
 		}
+		// 狗是 0.6×0.85 的碰撞箱（成年）/ 0.3×0.425（幼犬），需要立刻刷新尺寸缓存，
+		// 否则服务端仍按 1.8 高判定，钻不进一格高的空间。
+		player.refreshDimensions();
 		setPhase(GamePhase.WAITING_DOGS);
 		HumanAndDogMod.LOGGER.info("玩家 {} 自动成为狗", player.getName().getString());
-		// 狗首次进入需要选变种（先打开变种界面，再广播等待状态，避免被等待界面覆盖）
-		if (!data.variantConfirmed) {
+		// 流程：先选年龄（小狗 / 成年狗），再选狼变种；先开界面再广播等待状态，避免被等待界面覆盖
+		if (!data.ageConfirmed) {
+			ServerPlayNetworking.send(player, new OpenDogAgeScreenPayload());
+		} else if (!data.variantConfirmed) {
 			ServerPlayNetworking.send(player, new OpenDogVariantScreenPayload());
 		}
 		syncRoleState();
@@ -463,6 +545,24 @@ public class GameSession {
 		save();
 	}
 
+	/** 狗选择"小狗 / 成年狗"；选完立刻接着弹狼变种界面。 */
+	public void selectDogAge(ServerPlayer player, boolean baby) {
+		PlayerData data = data(player);
+		if (data == null || data.role != Role.DOG || data.ageConfirmed) {
+			return;
+		}
+		data.baby = baby;
+		data.ageConfirmed = true;
+		data.ageLocked = false;
+		data.growthTicks = 0;
+		HumanAndDogMod.LOGGER.info("狗 {} 选择了{}", player.getName().getString(), baby ? "小狗" : "成年狗");
+		// 尺寸 / 眼高随年龄变化，必须刷新
+		player.refreshDimensions();
+		broadcastDogVisual(player);
+		ServerPlayNetworking.send(player, new OpenDogVariantScreenPayload());
+		save();
+	}
+
 	public void selectVariant(ServerPlayer player, String variantId) {
 		PlayerData data = data(player);
 		if (data == null || data.role != Role.DOG) {
@@ -479,6 +579,238 @@ public class GameSession {
 		save();
 	}
 
+	// ---------------------------------------------------------------------
+	// 身份变更（/hd role、/hd swap、/hd age）
+	// ---------------------------------------------------------------------
+
+	/** 身份切换的结果。 */
+	public enum RoleChangeResult {
+		/** 切换成功。 */
+		OK,
+		/** 游戏已经开始，不允许再改。 */
+		LOCKED,
+		/** 目标身份已经被别人占了。 */
+		TAKEN
+	}
+
+	/**
+	 * 等待阶段修改自己的身份（{@code /hd role}）。
+	 * 人和狗各只有一个名额：目标身份被别人占用时返回 {@link RoleChangeResult#TAKEN}；
+	 * 开局之后（PLAYING / COUNTDOWN）返回 {@link RoleChangeResult#LOCKED}。
+	 */
+	public RoleChangeResult changeOwnRole(ServerPlayer player, Role target) {
+		if (phase == GamePhase.PLAYING || phase == GamePhase.COUNTDOWN) {
+			return RoleChangeResult.LOCKED;
+		}
+		PlayerData data = data(player);
+		if (data == null) {
+			return RoleChangeResult.LOCKED;
+		}
+		UUID id = player.getUUID();
+		if (data.role == target) {
+			syncTo(player);
+			syncRoleState();
+			return RoleChangeResult.OK;
+		}
+		switch (target) {
+			case HUMAN -> {
+				if (humanId != null && !humanId.equals(id)) {
+					return RoleChangeResult.TAKEN;
+				}
+				leaveDogRole(player, data);
+				spectatorIds.remove(id);
+				data.role = Role.HUMAN;
+				humanId = id;
+				player.setGameMode(GameType.SURVIVAL);
+				applyHumanBody(player);
+				setPhase(GamePhase.WAITING_DOGS);
+				HumanAndDogMod.LOGGER.info("{} 通过指令改为当人", player.getName().getString());
+			}
+			case DOG -> {
+				if (roleCount(Role.DOG) > 0 && !isDog(id)) {
+					return RoleChangeResult.TAKEN;
+				}
+				if (isHuman(id)) {
+					humanId = null;
+				}
+				spectatorIds.remove(id);
+				data.role = Role.DOG;
+				if (!dogIds.contains(id)) {
+					dogIds.add(id);
+				}
+				player.setGameMode(GameType.SURVIVAL);
+				com.humananddog.mechanic.DogMechanic.setupDog(player);
+				if (!data.wolfArmor.isEmpty()) {
+					com.humananddog.mechanic.DogMechanic.applyArmorModifier(player, true);
+				}
+				player.refreshDimensions();
+				if (!data.ageConfirmed) {
+					ServerPlayNetworking.send(player, new OpenDogAgeScreenPayload());
+				} else if (!data.variantConfirmed) {
+					ServerPlayNetworking.send(player, new OpenDogVariantScreenPayload());
+				} else {
+					broadcastDogVisual(player);
+				}
+				setPhase(GamePhase.WAITING_DOGS);
+				HumanAndDogMod.LOGGER.info("{} 通过指令改为当狗", player.getName().getString());
+			}
+			case SPECTATOR -> {
+				if (isHuman(id)) {
+					humanId = null;
+				}
+				leaveDogRole(player, data);
+				data.role = Role.SPECTATOR;
+				if (!spectatorIds.contains(id)) {
+					spectatorIds.add(id);
+				}
+				player.setGameMode(GameType.SPECTATOR);
+				player.sendSystemMessage(Component.translatable("human-and-dog.message.spectator"));
+				setPhase(humanId == null && dogIds.isEmpty() ? GamePhase.WAITING_HUMAN : GamePhase.WAITING_DOGS);
+				HumanAndDogMod.LOGGER.info("{} 通过指令改为观战者", player.getName().getString());
+			}
+			default -> {
+				return RoleChangeResult.LOCKED;
+			}
+		}
+		syncRoleState();
+		syncAll();
+		// 身份都变了，之前"等某个人回来"的前提不再成立：清掉掉线名单，按新阵容重新评估
+		offlineParticipants.clear();
+		recheckStart();
+		save();
+		return RoleChangeResult.OK;
+	}
+
+	/** {@code /hd age}：让狗重新走一遍"年龄 → 类型"的选择流程。 */
+	public void beginDogReconfigure(ServerPlayer dog) {
+		PlayerData data = data(dog);
+		if (data == null || data.role != Role.DOG) {
+			return;
+		}
+		// 把两个"已确认"标记清掉，selectDogAge / selectVariant 才会接受这次重选
+		data.ageConfirmed = false;
+		data.variantConfirmed = false;
+		save();
+		ServerPlayNetworking.send(dog, new OpenDogAgeScreenPayload());
+	}
+
+	/**
+	 * {@code /hd swap}：人和狗都在线时互换身份。
+	 * 狗的外观（变种、项圈、狼铠、年龄）整套搬给新狗，原来的人恢复成 20 血的普通人。
+	 */
+	public boolean swapHumanAndDog() {
+		ServerPlayer human = human();
+		List<ServerPlayer> onlineDogs = dogs();
+		if (human == null || onlineDogs.isEmpty()) {
+			return false;
+		}
+		ServerPlayer dog = onlineDogs.get(0);
+		UUID humanUuid = human.getUUID();
+		UUID dogUuid = dog.getUUID();
+		PlayerData humanData = players.get(humanUuid);
+		PlayerData dogData = players.get(dogUuid);
+		if (humanData == null || dogData == null) {
+			return false;
+		}
+		// 先把狗的整套数据搬给原来的人，再把角色对调
+		copyDogFields(dogData, humanData);
+		humanData.role = Role.DOG;
+		dogData.role = Role.HUMAN;
+		humanId = dogUuid;
+		dogIds.clear();
+		dogIds.add(humanUuid);
+		spectatorIds.remove(humanUuid);
+		spectatorIds.remove(dogUuid);
+
+		// 新狗
+		com.humananddog.mechanic.DogMechanic.setupDog(human);
+		if (!humanData.wolfArmor.isEmpty()) {
+			com.humananddog.mechanic.DogMechanic.applyArmorModifier(human, true);
+		}
+		human.refreshDimensions();
+		human.setGameMode(GameType.SURVIVAL);
+		// 新人
+		clearDogFields(dogData);
+		applyHumanBody(dog);
+		dog.setGameMode(GameType.SURVIVAL);
+
+		// 原来那只狗现在是人了：先让客户端把它的狼外观删掉
+		broadcastClearDogVisual(dogUuid);
+		broadcastDogVisual(human);
+		offlineParticipants.clear();
+		syncRoleState();
+		syncAll();
+		save();
+		return true;
+	}
+
+	/** 退出狗的身份：收回狼铠加成、清掉坐姿，并通知客户端别再把这个人画成狼。 */
+	private void leaveDogRole(ServerPlayer player, PlayerData data) {
+		if (dogIds.remove(player.getUUID())) {
+			com.humananddog.mechanic.DogMechanic.applyArmorModifier(player, false);
+			broadcastClearDogVisual(player.getUUID());
+		}
+		if (data.role == Role.DOG) {
+			data.sitting = false;
+			data.sitPosSet = false;
+		}
+	}
+
+	/** 告诉所有客户端：这个 UUID 已经不是狗了。 */
+	private void broadcastClearDogVisual(UUID id) {
+		ClearDogVisualPayload payload = new ClearDogVisualPayload(id.toString());
+		for (ServerPlayer p : PlayerLookup.all(server)) {
+			ServerPlayNetworking.send(p, payload);
+		}
+	}
+
+	/** 把玩家身体恢复成"人"：20 血上限、去掉狼铠护甲、碰撞箱回到玩家尺寸。 */
+	private void applyHumanBody(ServerPlayer player) {
+		AttributeInstance health = player.getAttribute(Attributes.MAX_HEALTH);
+		if (health != null) {
+			health.setBaseValue(20.0);
+		}
+		if (player.getHealth() > 20.0F) {
+			player.setHealth(20.0F);
+		}
+		com.humananddog.mechanic.DogMechanic.applyArmorModifier(player, false);
+		player.refreshDimensions();
+	}
+
+	/** 复制狗相关字段（互换身份时用）。 */
+	private static void copyDogFields(PlayerData from, PlayerData to) {
+		to.dogVariant = from.dogVariant;
+		to.variantConfirmed = from.variantConfirmed;
+		to.collarColor = from.collarColor;
+		to.wolfArmor = from.wolfArmor.isEmpty() ? ItemStack.EMPTY : from.wolfArmor.copy();
+		to.sitting = false;
+		to.sitPosSet = false;
+		to.baby = from.baby;
+		to.ageConfirmed = from.ageConfirmed;
+		to.ageLocked = from.ageLocked;
+		to.growthTicks = from.growthTicks;
+		to.loveTicks = 0;
+		to.breedTicks = 0;
+		to.breedCooldown = from.breedCooldown;
+	}
+
+	/** 清空狗相关字段（变成人之后，下次当狗需要重新选年龄和类型）。 */
+	private static void clearDogFields(PlayerData data) {
+		data.dogVariant = "";
+		data.variantConfirmed = false;
+		data.collarColor = "red";
+		data.wolfArmor = ItemStack.EMPTY;
+		data.sitting = false;
+		data.sitPosSet = false;
+		data.baby = false;
+		data.ageConfirmed = false;
+		data.ageLocked = false;
+		data.growthTicks = 0;
+		data.loveTicks = 0;
+		data.breedTicks = 0;
+		data.breedCooldown = 0;
+	}
+
 	/**
 	 * 重新评估"现在能不能开局 / 继续游戏"。
 	 * 该方法是幂等的，等待阶段每个 tick 都会被 {@link #tickAlways()} 调用一次。
@@ -487,35 +819,43 @@ public class GameSession {
 		if (phase == GamePhase.PLAYING || phase == GamePhase.COUNTDOWN) {
 			return;
 		}
-		// 还没人当人：没有狗时停在房主选角色界面，已经有狗时等第二个玩家来当人
-		if (humanId == null) {
-			setPhase(dogIds.isEmpty() ? GamePhase.WAITING_HUMAN : GamePhase.WAITING_DOGS);
-			syncIfChanged();
+		// 掉线等待：人和狗都回来了就继续（不重新开局、不传送）
+		if (phase == GamePhase.WAITING_PARTNER) {
+			if (offlineParticipants.isEmpty() && human() != null && !dogs().isEmpty()) {
+				setPhase(GamePhase.PLAYING);
+				HumanAndDogMod.LOGGER.info("人狗同行：伙伴已回来，继续游戏");
+				syncAll();
+				save();
+			} else {
+				syncIfChanged();
+			}
 			return;
 		}
-		if (dogIds.isEmpty()) {
+		// 还没人当人：没有狗时停在房主选角色界面，已经有狗时等第二个玩家来当人
+		if (humanId == null) {
+			stayWaiting(roleCount(Role.DOG) == 0 ? GamePhase.WAITING_HUMAN : GamePhase.WAITING_DOGS, "还没有人");
+			return;
+		}
+		if (roleCount(Role.DOG) == 0) {
 			if (com.humananddog.dev.DevFlags.SOLO && human() != null) {
 				// 开发自测：单人没有狗也直接开局，用于验证开局流程与存档写盘
 				startGame();
 				return;
 			}
-			setPhase(GamePhase.WAITING_DOGS);
-			syncIfChanged();
+			stayWaiting(GamePhase.WAITING_DOGS, "还没有狗");
 			return;
 		}
 		// 狗已就绪但人不在线（掉线 / 还没回来）：保持等待
 		ServerPlayer human = human();
 		if (human == null) {
-			setPhase(GamePhase.WAITING_DOGS);
-			syncIfChanged();
+			stayWaiting(GamePhase.WAITING_DOGS, "人不在线");
 			return;
 		}
 		// 只要求"在线"的狗已确认变种：存档里已离线、再也不会回来的旧狗
 		// 不应该把整局永久卡死在等待界面（原实现按 dogIds 全量判断，离线即死锁）。
 		List<ServerPlayer> onlineDogs = dogs();
 		if (onlineDogs.isEmpty()) {
-			setPhase(GamePhase.WAITING_DOGS);
-			syncIfChanged();
+			stayWaiting(GamePhase.WAITING_DOGS, "狗不在线");
 			return;
 		}
 		boolean allConfirmed = true;
@@ -527,8 +867,7 @@ public class GameSession {
 			}
 		}
 		if (!allConfirmed) {
-			setPhase(GamePhase.WAITING_DOGS);
-			syncIfChanged();
+			stayWaiting(GamePhase.WAITING_DOGS, "狗还没确认类型");
 			return;
 		}
 		if (loadedFromSave) {
@@ -541,6 +880,651 @@ public class GameSession {
 			return;
 		}
 		startGame();
+	}
+
+	// ---------------------------------------------------------------------
+	// 狗身侧挂方块
+	// ---------------------------------------------------------------------
+
+	/** 每只狗左右两侧的虚拟容器（箱子一类才有内容），按需创建。 */
+	private final Map<UUID, net.minecraft.world.Container[]> blockContainers = new HashMap<>();
+
+	/** 方块 id 能否作为"可挂载方块"（有物品形态、不是空气）。 */
+	public static boolean isAttachable(ItemStack stack) {
+		if (stack.isEmpty()) {
+			return false;
+		}
+		net.minecraft.world.level.block.Block block = net.minecraft.world.level.block.Block.byItem(stack.getItem());
+		return block != net.minecraft.world.level.block.Blocks.AIR;
+	}
+
+	/**
+	 * 人拿着方块右键狗：挂到左侧，左侧有就挂右侧，两侧都有就替换左侧（旧方块还给玩家）。
+	 *
+	 * @return 是否真的挂上了
+	 */
+	public boolean attachBlock(ServerPlayer dog, ServerPlayer human, ItemStack stack) {
+		return attachBlock(dog, human, stack, null);
+	}
+
+	/**
+	 * 同上，但可以指定优先挂哪一侧（shift+右键时按"人站在狗的哪一边"决定）。
+	 *
+	 * @param preferredLeft 优先挂左侧；该侧已占且另一侧空着时优先挂空的那侧
+	 */
+	public boolean attachBlock(ServerPlayer dog, ServerPlayer human, ItemStack stack, Boolean preferredLeft) {
+		PlayerData data = data(dog);
+		if (data == null || !isAttachable(stack)) {
+			return false;
+		}
+		String id = net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(
+			net.minecraft.world.level.block.Block.byItem(stack.getItem())).toString();
+		boolean left;
+		if (preferredLeft == null) {
+			// 老行为：左 → 右 → 替换左
+			left = data.leftBlock.isEmpty() || !data.rightBlock.isEmpty();
+		} else if (preferredLeft) {
+			if (data.leftBlock.isEmpty()) {
+				left = true;                     // 优先侧空 → 用优先侧
+			} else if (data.rightBlock.isEmpty()) {
+				left = false;                    // 优先侧占用、另一侧空 → 用另一侧
+			} else {
+				left = true;                     // 两侧都满 → 替换优先侧
+			}
+		} else {
+			if (data.rightBlock.isEmpty()) {
+				left = false;
+			} else if (data.leftBlock.isEmpty()) {
+				left = true;
+			} else {
+				left = false;
+			}
+		}
+		String old = left ? data.leftBlock : data.rightBlock;
+		if (!old.isEmpty()) {
+			// 替换：把旧方块还给玩家
+			net.minecraft.world.level.block.Block oldBlock =
+				net.minecraft.core.registries.BuiltInRegistries.BLOCK.getValue(Identifier.parse(old));
+			if (oldBlock != null && oldBlock != net.minecraft.world.level.block.Blocks.AIR) {
+				ItemStack back = new ItemStack(oldBlock);
+				if (!human.getInventory().add(back)) {
+					human.drop(back, false, net.minecraft.util.Prediction.SERVER_ONLY);
+				}
+			}
+			// 旧容器的东西一并还回去
+			net.minecraft.world.Container oldContainer = containerFor(data, left);
+			for (int i = 0; i < oldContainer.getContainerSize(); i++) {
+				ItemStack s = oldContainer.getItem(i);
+				if (!s.isEmpty() && !human.getInventory().add(s)) {
+					human.drop(s, false, net.minecraft.util.Prediction.SERVER_ONLY);
+				}
+			}
+			oldContainer.clearContent();
+			if (left) {
+				data.leftItems.clear();
+			} else {
+				data.rightItems.clear();
+			}
+		}
+		if (left) {
+			data.leftBlock = id;
+		} else {
+			data.rightBlock = id;
+		}
+		stack.consume(1, human);
+		// 立刻建好容器：熔炉要从挂上那一刻就开始烧，而不是等第一次打开界面
+		containerFor(data, left);
+		broadcastDogBlocks(dog);
+		save();
+		HumanAndDogMod.LOGGER.info("狗 {} 挂上了方块 {}（{}）", dog.getName().getString(), id, left ? "左" : "右");
+		return true;
+	}
+
+	/**
+	 * 主人按下"取出挂件"快捷键：把附近（8 格内最近的）狗身上挂的方块全部取下，
+	 * 方块本身与容器里的东西一并放回主人背包，背包满了就掉在脚边。
+	 */
+	public void takeBlocksFromNearbyDog(ServerPlayer human) {
+		if (!isHuman(human.getUUID())) {
+			human.sendSystemMessage(Component.translatable("human-and-dog.message.take_blocks.not_human"));
+			return;
+		}
+		ServerPlayer target = null;
+		double best = 8.0 * 8.0;
+		for (ServerPlayer dog : dogs()) {
+			if (dog.level() != human.level()) {
+				continue;
+			}
+			double d = human.distanceToSqr(dog);
+			if (d <= best) {
+				best = d;
+				target = dog;
+			}
+		}
+		if (target == null) {
+			human.sendSystemMessage(Component.translatable("human-and-dog.message.take_blocks.no_dog"));
+			return;
+		}
+		PlayerData data = data(target);
+		if (data == null || (data.leftBlock.isEmpty() && data.rightBlock.isEmpty())) {
+			human.sendSystemMessage(Component.translatable("human-and-dog.message.take_blocks.empty"));
+			return;
+		}
+		for (int side = 0; side < 2; side++) {
+			boolean left = side == 0;
+			String blockId = left ? data.leftBlock : data.rightBlock;
+			if (blockId.isEmpty()) {
+				continue;
+			}
+			// 先把容器里的东西还给主人，再还方块本体
+			net.minecraft.world.Container container = containerFor(data, left);
+			for (int i = 0; i < container.getContainerSize(); i++) {
+				ItemStack stack = container.getItem(i);
+				if (!stack.isEmpty()) {
+					giveOrDrop(human, stack.copy());
+				}
+			}
+			container.clearContent();
+			net.minecraft.world.level.block.Block block =
+				net.minecraft.core.registries.BuiltInRegistries.BLOCK.getValue(Identifier.parse(blockId));
+			if (block != null && block != net.minecraft.world.level.block.Blocks.AIR) {
+				giveOrDrop(human, new ItemStack(block));
+			}
+			if (left) {
+				data.leftBlock = "";
+				data.leftItems.clear();
+			} else {
+				data.rightBlock = "";
+				data.rightItems.clear();
+			}
+			blockContainers.getOrDefault(data.uuid, new net.minecraft.world.Container[2])[side] = null;
+		}
+		broadcastDogBlocks(target);
+		save();
+		human.sendSystemMessage(Component.translatable("human-and-dog.message.take_blocks.done",
+			target.getName()));
+	}
+
+	/** 塞进背包，塞不下就掉在玩家脚边。 */
+	private static void giveOrDrop(ServerPlayer player, ItemStack stack) {
+		if (stack.isEmpty()) {
+			return;
+		}
+		if (!player.getInventory().add(stack)) {
+			player.drop(stack, false, net.minecraft.util.Prediction.SERVER_ONLY);
+		}
+	}
+
+	/**
+	 * 人站在狗的哪一侧（真 = 左侧）。渲染挂件与"shift+右键挂方块"共用这一套方位判断。
+	 */
+	public boolean isHumanOnDogLeft(ServerPlayer human, ServerPlayer dog) {
+		net.minecraft.world.phys.Vec3 look = dog.getLookAngle();
+		net.minecraft.world.phys.Vec3 right = new net.minecraft.world.phys.Vec3(look.z, 0, -look.x);
+		net.minecraft.world.phys.Vec3 toHuman =
+			new net.minecraft.world.phys.Vec3(human.getX() - dog.getX(), 0, human.getZ() - dog.getZ());
+		return toHuman.dot(right) < 0;
+	}
+
+	/**
+	 * shift+右键狗：打开它身上方块的界面。
+	 * 两侧都有时，按"人站在狗的哪一侧"来选。
+	 *
+	 * @return 是否打开了界面
+	 */
+	public boolean openDogBlockMenu(ServerPlayer human, ServerPlayer dog) {
+		PlayerData data = data(dog);
+		if (data == null) {
+			return false;
+		}
+		boolean left;
+		if (data.leftBlock.isEmpty() && data.rightBlock.isEmpty()) {
+			return false;
+		} else if (data.rightBlock.isEmpty()) {
+			left = true;
+		} else if (data.leftBlock.isEmpty()) {
+			left = false;
+		} else {
+			left = isHumanOnDogLeft(human, dog);
+		}
+		String id = left ? data.leftBlock : data.rightBlock;
+		net.minecraft.world.level.block.Block block =
+			net.minecraft.core.registries.BuiltInRegistries.BLOCK.getValue(Identifier.parse(id));
+		if (block == null || block == net.minecraft.world.level.block.Blocks.AIR) {
+			return false;
+		}
+		if (block instanceof net.minecraft.world.level.block.CraftingTableBlock) {
+			human.openMenu(new net.minecraft.world.SimpleMenuProvider(
+				(cid, inv, p) -> new net.minecraft.world.inventory.CraftingMenu(
+					cid, inv, net.minecraft.world.inventory.ContainerLevelAccess.NULL),
+				Component.translatable("container.crafting")));
+			return true;
+		}
+		// 熔炉 / 高炉 / 烟熏炉：真正的炉子，能烧、能看进度
+		if (block instanceof net.minecraft.world.level.block.AbstractFurnaceBlock) {
+			if (containerFor(data, left) instanceof net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity furnace) {
+				human.openMenu(new net.minecraft.world.SimpleMenuProvider(
+					(cid, inv, p) -> new net.minecraft.world.inventory.FurnaceMenu(
+						cid, inv, furnace,
+						((com.humananddog.mixin.FurnaceAccessor) furnace).humananddog$dataAccess()),
+					block.getName()));
+				return true;
+			}
+		}
+		if (isStorageBlock(block)) {
+			net.minecraft.world.Container container = containerFor(data, left);
+			human.openMenu(new net.minecraft.world.SimpleMenuProvider(
+				(cid, inv, p) -> net.minecraft.world.inventory.ChestMenu.threeRows(cid, inv, container),
+				block.getName()));
+			return true;
+		}
+		// 末影箱：直接打开主人自己的末影箱库存（和原版一样，谁开看谁的）
+		if (block instanceof net.minecraft.world.level.block.EnderChestBlock) {
+			human.openMenu(new net.minecraft.world.SimpleMenuProvider(
+				(cid, inv, p) -> new net.minecraft.world.inventory.ChestMenu(
+					net.minecraft.world.inventory.MenuType.GENERIC_9x3, cid, inv,
+					p.getEnderChestInventory(), 3),
+				block.getName()));
+			return true;
+		}
+		// 酿造台：5 格容器（花哨的酿造进度没实现，但东西能放、能拿）
+		if (block instanceof net.minecraft.world.level.block.BrewingStandBlock) {
+			net.minecraft.world.Container container = containerFor(data, left);
+			net.minecraft.world.inventory.ContainerData brewingData =
+				new net.minecraft.world.inventory.SimpleContainerData(2);
+			human.openMenu(new net.minecraft.world.SimpleMenuProvider(
+				(cid, inv, p) -> new net.minecraft.world.inventory.BrewingStandMenu(
+					cid, inv, container, brewingData),
+				block.getName()));
+			return true;
+		}
+		// 讲台
+		if (block instanceof net.minecraft.world.level.block.LecternBlock) {
+			net.minecraft.world.Container container = containerFor(data, left);
+			human.openMenu(new net.minecraft.world.SimpleMenuProvider(
+				(cid, inv, p) -> new net.minecraft.world.inventory.LecternMenu(
+					cid, container, new net.minecraft.world.inventory.SimpleContainerData(1)),
+				block.getName()));
+			return true;
+		}
+		// 信标
+		if (block instanceof net.minecraft.world.level.block.BeaconBlock) {
+			human.openMenu(new net.minecraft.world.SimpleMenuProvider(
+				(cid, inv, p) -> new net.minecraft.world.inventory.BeaconMenu(
+					cid, inv, new net.minecraft.world.inventory.SimpleContainerData(3),
+					net.minecraft.world.inventory.ContainerLevelAccess.NULL),
+				block.getName()));
+			return true;
+		}
+		// 其它"点开就有一个原版界面"的方块
+		if (openUtilityMenu(human, block)) {
+			return true;
+		}
+		human.sendSystemMessage(Component.translatable("human-and-dog.message.block_unsupported", block.getName()));
+		return true;
+	}
+
+	/**
+	 * 一堆"原版自带界面"的方块：切石机、砂轮、织布机、锻造台、铁砧、附魔台、制图台。
+	 * 都使用原版的两参构造（ContainerLevelAccess.NULL），界面能正常用。
+	 */
+	private static boolean openUtilityMenu(ServerPlayer human, net.minecraft.world.level.block.Block block) {
+		net.minecraft.world.SimpleMenuProvider provider = null;
+		if (block instanceof net.minecraft.world.level.block.StonecutterBlock) {
+			provider = new net.minecraft.world.SimpleMenuProvider(
+				(cid, inv, p) -> new net.minecraft.world.inventory.StonecutterMenu(cid, inv), block.getName());
+		} else if (block instanceof net.minecraft.world.level.block.GrindstoneBlock) {
+			provider = new net.minecraft.world.SimpleMenuProvider(
+				(cid, inv, p) -> new net.minecraft.world.inventory.GrindstoneMenu(cid, inv), block.getName());
+		} else if (block instanceof net.minecraft.world.level.block.LoomBlock) {
+			provider = new net.minecraft.world.SimpleMenuProvider(
+				(cid, inv, p) -> new net.minecraft.world.inventory.LoomMenu(cid, inv), block.getName());
+		} else if (block instanceof net.minecraft.world.level.block.SmithingTableBlock) {
+			provider = new net.minecraft.world.SimpleMenuProvider(
+				(cid, inv, p) -> new net.minecraft.world.inventory.SmithingMenu(cid, inv), block.getName());
+		} else if (block instanceof net.minecraft.world.level.block.AnvilBlock) {
+			provider = new net.minecraft.world.SimpleMenuProvider(
+				(cid, inv, p) -> new net.minecraft.world.inventory.AnvilMenu(cid, inv), block.getName());
+		} else if (block instanceof net.minecraft.world.level.block.EnchantingTableBlock) {
+			provider = new net.minecraft.world.SimpleMenuProvider(
+				(cid, inv, p) -> new net.minecraft.world.inventory.EnchantmentMenu(cid, inv), block.getName());
+		} else if (block instanceof net.minecraft.world.level.block.CartographyTableBlock) {
+			provider = new net.minecraft.world.SimpleMenuProvider(
+				(cid, inv, p) -> new net.minecraft.world.inventory.CartographyTableMenu(cid, inv), block.getName());
+		}
+		if (provider == null) {
+			return false;
+		}
+		human.openMenu(provider);
+		return true;
+	}
+
+	/** 目前能打开界面的存储类方块。 */
+	private static boolean isStorageBlock(net.minecraft.world.level.block.Block block) {
+		return block instanceof net.minecraft.world.level.block.ChestBlock
+			|| block instanceof net.minecraft.world.level.block.BarrelBlock
+			|| block instanceof net.minecraft.world.level.block.ShulkerBoxBlock
+			|| block instanceof net.minecraft.world.level.block.HopperBlock
+			|| block instanceof net.minecraft.world.level.block.DispenserBlock
+			|| block instanceof net.minecraft.world.level.block.DropperBlock
+			|| block instanceof net.minecraft.world.level.block.CrafterBlock;
+	}
+
+	/** 挂件容器格数：炉子 3、酿造台 5、讲台 1，其余（箱子一类）27。 */
+	private static int containerSizeFor(net.minecraft.world.level.block.Block block) {
+		if (block instanceof net.minecraft.world.level.block.AbstractFurnaceBlock) {
+			return 3;
+		}
+		if (block instanceof net.minecraft.world.level.block.BrewingStandBlock) {
+			return 5;
+		}
+		if (block instanceof net.minecraft.world.level.block.LecternBlock) {
+			return 1;
+		}
+		return 27;
+	}
+
+	/** 取（并按需创建）某只狗某一侧的挂件容器：普通方块 27 格，熔炉类为真正的炉子实体。 */
+	private net.minecraft.world.Container containerFor(PlayerData data, boolean left) {
+		String blockId = left ? data.leftBlock : data.rightBlock;
+		net.minecraft.world.level.block.Block block = blockId.isEmpty()
+			? net.minecraft.world.level.block.Blocks.AIR
+			: net.minecraft.core.registries.BuiltInRegistries.BLOCK.getValue(Identifier.parse(blockId));
+		boolean furnaceType = block instanceof net.minecraft.world.level.block.AbstractFurnaceBlock;
+		int size = containerSizeFor(block);
+
+		net.minecraft.world.Container[] pair =
+			blockContainers.computeIfAbsent(data.uuid, k -> new net.minecraft.world.Container[2]);
+		int idx = left ? 0 : 1;
+		net.minecraft.world.Container existing = pair[idx];
+		boolean reusable = existing != null
+			&& existing.getContainerSize() == size
+			&& (existing instanceof net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity) == furnaceType;
+		if (reusable) {
+			return existing;
+		}
+
+		net.minecraft.world.Container container;
+		if (furnaceType) {
+			container = createFurnace(block, server.overworld());
+		} else {
+			container = new net.minecraft.world.SimpleContainer(size);
+		}
+		java.util.List<ItemStack> src = left ? data.leftItems : data.rightItems;
+		for (int i = 0; i < Math.min(size, src.size()); i++) {
+			container.setItem(i, src.get(i));
+		}
+		pair[idx] = container;
+		return container;
+	}
+
+	/**
+	 * 造一个"虚拟熔炉"方块实体：它不在世界里，只用来借原版的烧炼逻辑与界面。
+	 *
+	 * <p>位置故意放在世界最低点以下：{@code AbstractFurnaceBlockEntity.serverTick}
+	 * 在"点燃状态变化"时会调用 {@code level.setBlockAndUpdate(pos, state)}，
+	 * 而该坐标超出建造高度，原版会直接返回 false，绝不会真的在世界里放一个熔炉。
+	 *
+	 * <p>另外必须覆盖 {@code stillValid}：原版 {@code BaseContainerBlockEntity.stillValid}
+	 * 会校验"玩家离该方块 4 格内且该坐标仍是这个方块实体"，虚拟炉子两条都不成立，
+	 * 于是菜单会在打开后的下一 tick 被服务端判定失效、瞬间关闭。
+	 */
+	private net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity createFurnace(
+		net.minecraft.world.level.block.Block block, net.minecraft.server.level.ServerLevel level) {
+		net.minecraft.core.BlockPos pos = new net.minecraft.core.BlockPos(0, level.getMinY() - 16, 0);
+		net.minecraft.world.level.block.state.BlockState state = block.defaultBlockState();
+		net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity furnace;
+		if (block instanceof net.minecraft.world.level.block.BlastFurnaceBlock) {
+			furnace = new net.minecraft.world.level.block.entity.BlastFurnaceBlockEntity(pos, state) {
+				@Override
+				public boolean stillValid(net.minecraft.world.entity.player.Player player) {
+					return true;
+				}
+			};
+		} else if (block instanceof net.minecraft.world.level.block.SmokerBlock) {
+			furnace = new net.minecraft.world.level.block.entity.SmokerBlockEntity(pos, state) {
+				@Override
+				public boolean stillValid(net.minecraft.world.entity.player.Player player) {
+					return true;
+				}
+			};
+		} else {
+			furnace = new net.minecraft.world.level.block.entity.FurnaceBlockEntity(pos, state) {
+				@Override
+				public boolean stillValid(net.minecraft.world.entity.player.Player player) {
+					return true;
+				}
+			};
+		}
+		furnace.setLevel(level);
+		return furnace;
+	}
+
+	/** 每侧上一次的燃烧状态，用来只在变化时广播（避免每 tick 发包）。 */
+	private final Map<UUID, boolean[]> lastLit = new HashMap<>();
+
+	/** 每 tick 驱动狗背上的虚拟熔炉（真实烧炼 + 燃烧状态 / 火苗粒子）。 */
+	private void tickDogFurnaces() {
+		for (Map.Entry<UUID, net.minecraft.world.Container[]> entry : blockContainers.entrySet()) {
+			PlayerData data = players.get(entry.getKey());
+			ServerPlayer dog = findDog(data);
+			if (dog == null || !(dog.level() instanceof net.minecraft.server.level.ServerLevel level)) {
+				continue;
+			}
+			net.minecraft.world.Container[] pair = entry.getValue();
+			boolean[] wasLit = lastLit.computeIfAbsent(data.uuid, k -> new boolean[2]);
+			boolean litChanged = false;
+			for (int side = 0; side < 2; side++) {
+				if (!(pair[side] instanceof net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity furnace)) {
+					continue;
+				}
+				String blockId = side == 0 ? data.leftBlock : data.rightBlock;
+				net.minecraft.world.level.block.Block block =
+					net.minecraft.core.registries.BuiltInRegistries.BLOCK.getValue(Identifier.parse(blockId));
+				if (!(block instanceof net.minecraft.world.level.block.AbstractFurnaceBlock)) {
+					continue;
+				}
+				furnace.setLevel(level);
+				net.minecraft.core.BlockPos pos = new net.minecraft.core.BlockPos(0, level.getMinY() - 16, 0);
+				try {
+					net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity.serverTick(
+						level, pos, block.defaultBlockState(), furnace);
+				} catch (RuntimeException e) {
+					HumanAndDogMod.LOGGER.warn("[人狗同行] 虚拟熔炉 tick 失败：{}", e.toString());
+				}
+				// 燃烧中：挂件换成 LIT 外观（客户端处理），并从狗的身侧冒火苗 / 烟
+				boolean lit = ((com.humananddog.mixin.FurnaceAccessor) furnace)
+					.humananddog$dataAccess().get(0) > 0;
+				if (lit != wasLit[side]) {
+					wasLit[side] = lit;
+					litChanged = true;
+				}
+				if (lit) {
+					spawnFurnaceParticles(level, dog, side);
+				}
+			}
+			if (litChanged) {
+				broadcastDogBlocks(dog);
+			}
+		}
+	}
+
+	/** 在狗某一侧挂件的位置冒火苗与烟（原版熔炉点燃时的观感）。 */
+	private void spawnFurnaceParticles(net.minecraft.server.level.ServerLevel level, ServerPlayer dog, int side) {
+		long time = level.getGameTime();
+		if (time % 3L != 0L) {
+			return;
+		}
+		double yaw = Math.toRadians(dog.yBodyRot);
+		double offset = side == 0 ? -0.4 : 0.4;
+		double x = dog.getX() + Math.cos(yaw) * offset;
+		double y = dog.getY() + 0.42;
+		double z = dog.getZ() + Math.sin(yaw) * offset;
+		level.sendParticles(net.minecraft.core.particles.ParticleTypes.FLAME,
+			x, y, z, 1, 0.02, 0.02, 0.02, 0.0);
+		if (time % 9L == 0L) {
+			level.sendParticles(net.minecraft.core.particles.ParticleTypes.SMOKE,
+				x, y + 0.15, z, 1, 0.02, 0.02, 0.02, 0.005);
+		}
+	}
+
+	/** 按 UUID 找在线的狗玩家。 */
+	private ServerPlayer findDog(PlayerData data) {
+		if (data == null || !data.isDog()) {
+			return null;
+		}
+		for (ServerPlayer p : dogs()) {
+			if (p.getUUID().equals(data.uuid)) {
+				return p;
+			}
+		}
+		return null;
+	}
+
+	/** 把狗身上挂了什么同步给所有客户端（客户端据此渲染方块）。 */
+	public void broadcastDogBlocks(ServerPlayer dog) {
+		PlayerData data = data(dog);
+		if (data == null) {
+			return;
+		}
+		DogBlocksPayload payload = new DogBlocksPayload(
+			dog.getUUID().toString(), data.leftBlock, data.rightBlock,
+			isSideLit(data, true), isSideLit(data, false));
+		for (ServerPlayer p : PlayerLookup.all(server)) {
+			ServerPlayNetworking.send(p, payload);
+		}
+	}
+
+	/** 某一侧挂件当前是否"正在燃烧"（只有炉子类会）。 */
+	private boolean isSideLit(PlayerData data, boolean left) {
+		net.minecraft.world.Container[] pair = blockContainers.get(data.uuid);
+		if (pair == null) {
+			return false;
+		}
+		net.minecraft.world.Container container = pair[left ? 0 : 1];
+		if (container instanceof net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity furnace) {
+			return ((com.humananddog.mixin.FurnaceAccessor) furnace).humananddog$dataAccess().get(0) > 0;
+		}
+		return false;
+	}
+
+	/** 狗身上是否挂着指定方块。 */
+	public boolean hasBlock(ServerPlayer dog, net.minecraft.world.level.block.Block block) {
+		PlayerData data = data(dog);
+		if (data == null) {
+			return false;
+		}
+		for (String id : new String[]{data.leftBlock, data.rightBlock}) {
+			if (id.isEmpty()) {
+				continue;
+			}
+			net.minecraft.world.level.block.Block attached =
+				net.minecraft.core.registries.BuiltInRegistries.BLOCK.getValue(Identifier.parse(id));
+			if (attached == block) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * 狗身上挂着唱片机时，主人拿唱片 shift+右键：按原版唱片机的音量与音源播放这首歌。
+	 *
+	 * @return 是否成功播了歌
+	 */
+	public boolean playDisc(ServerPlayer dog, ServerPlayer human, ItemStack disc) {
+		net.minecraft.world.item.JukeboxPlayable playable = disc.get(net.minecraft.core.component.DataComponents.JUKEBOX_PLAYABLE);
+		if (playable == null || !hasBlock(dog, net.minecraft.world.level.block.Blocks.JUKEBOX)) {
+			return false;
+		}
+		net.minecraft.world.item.JukeboxSong song = playable.song().value();
+		net.minecraft.sounds.SoundEvent event = song.soundEvent().value();
+		Identifier soundId = net.minecraft.core.registries.BuiltInRegistries.SOUND_EVENT.getKey(event);
+		if (soundId != null) {
+			// 交给客户端自己播放并持有 SoundInstance：这样把唱片机取下来时能立刻停掉。
+			// 直接用 level.playSound 是"放出去就不管"的，取下唱片机音乐也不会停。
+			DiscPayload payload = new DiscPayload(dog.getUUID().toString(), soundId.toString(),
+				dog.getX(), dog.getY(), dog.getZ());
+			for (ServerPlayer p : PlayerLookup.all(server)) {
+				ServerPlayNetworking.send(p, payload);
+			}
+		}
+		if (dog.level() instanceof net.minecraft.server.level.ServerLevel level) {
+			level.sendParticles(net.minecraft.core.particles.ParticleTypes.NOTE,
+				dog.getX(), dog.getY() + 1.2, dog.getZ(), 6, 0.3, 0.3, 0.3, 0.0);
+		}
+		human.sendSystemMessage(Component.translatable("human-and-dog.message.disc.playing",
+			song.description()));
+		return true;
+	}
+
+
+	/** 每 tick 把虚拟容器的内容写回玩家数据（菜单里改动后存档才拿得到）。 */
+	private void syncBlockContainers() {
+		for (Map.Entry<UUID, net.minecraft.world.Container[]> entry : blockContainers.entrySet()) {
+			PlayerData data = players.get(entry.getKey());
+			if (data == null) {
+				continue;
+			}
+			net.minecraft.world.Container[] pair = entry.getValue();
+			for (int side = 0; side < 2; side++) {
+				net.minecraft.world.Container container = pair[side];
+				if (container == null) {
+					continue;
+				}
+				java.util.List<ItemStack> dst = side == 0 ? data.leftItems : data.rightItems;
+				boolean changed = dst.size() != container.getContainerSize();
+				for (int i = 0; i < container.getContainerSize(); i++) {
+					ItemStack now = container.getItem(i);
+					if (i >= dst.size() || !ItemStack.matches(dst.get(i), now)) {
+						changed = true;
+					}
+					if (i >= dst.size()) {
+						dst.add(now.copy());
+					} else {
+						dst.set(i, now.copy());
+					}
+				}
+				if (changed) {
+					save();
+				}
+			}
+		}
+	}
+
+	/** 把所有狗身上的方块情况发给某个玩家（进服 / 重连时用）。 */
+	public void sendAllDogBlocksTo(ServerPlayer player) {
+		for (ServerPlayer dog : dogs()) {
+			PlayerData data = data(dog);
+			if (data != null) {
+				ServerPlayNetworking.send(player, new DogBlocksPayload(
+					dog.getUUID().toString(), data.leftBlock, data.rightBlock,
+					isSideLit(data, true), isSideLit(data, false)));
+			}
+		}
+		if (isDog(player.getUUID())) {
+			// 自己就是狗：也要把"自己身上挂了什么"推给自己（第三人称要看得到）
+			broadcastDogBlocks(player);
+		}
+	}
+
+	/** 上一次停在等待的原因，避免暂停期间每个 tick 刷同一条日志。 */
+	private String lastWaitReason;
+
+	/**
+	 * 停在等待阶段，并把"为什么还没开局"记一条日志（只在原因变化时输出）。
+	 * 读档后卡在等待界面时，看这条日志就能知道是缺人、缺狗，还是狗没确认类型。
+	 */
+	private void stayWaiting(GamePhase next, String reason) {
+		if (!reason.equals(lastWaitReason)) {
+			lastWaitReason = reason;
+			HumanAndDogMod.LOGGER.info("[人狗同行] 停在等待：{}｜人={} 狗名单={} 在线狗={} 读档恢复={}",
+				reason,
+				humanId == null ? "无" : (human() != null ? "在线" : "离线"),
+				dogIds.size(), dogs().size(), loadedFromSave);
+		}
+		setPhase(next);
+		syncIfChanged();
 	}
 
 	/** 切换阶段（只在真正变化时记录日志）。 */
@@ -628,6 +1612,16 @@ public class GameSession {
 	// ---------------------------------------------------------------------
 
 	public void tick() {
+		syncBlockContainers();
+		// 狗背上的熔炉要真的会烧：每 tick 用原版烧炼逻辑驱动一次
+		tickDogFurnaces();
+		// 挂件同步自愈：每 20 tick 全量重发一次。重连 / 丢包时客户端也能补上
+		// （之前只在本 tick 的 JOIN 里发一次，客户端还没就绪就会漏掉，表现为"重新进世界看不到挂件"）。
+		if (server.getTickCount() % 20 == 0) {
+			for (ServerPlayer p : PlayerLookup.all(server)) {
+				sendAllDogBlocksTo(p);
+			}
+		}
 		// 指令始终强制开启且无法关闭
 		server.getWorldData().setAllowCommands(true);
 
@@ -680,7 +1674,7 @@ public class GameSession {
 		for (ServerPlayer dog : dogs()) {
 			PlayerData d = data(dog);
 			if (d != null) {
-				com.humananddog.mechanic.DogMechanic.tickDog(dog, d);
+				com.humananddog.mechanic.DogMechanic.tickDog(this, dog, d);
 			}
 		}
 	}
@@ -694,7 +1688,7 @@ public class GameSession {
 	 * 否则阶段一旦停在等待（旧实现里 assignDog / 存档恢复都可能停在那里）就永远出不来。
 	 */
 	public void tickAlways() {
-		if (phase == GamePhase.WAITING_DOGS) {
+		if (phase == GamePhase.WAITING_DOGS || phase == GamePhase.WAITING_PARTNER) {
 			recheckStart();
 		}
 	}
@@ -706,20 +1700,26 @@ public class GameSession {
 		syncAll();
 	}
 
-	/** 无碰撞队伍名（隐藏不显示在玩家名牌上，只用于关闭人狗互相推挤）。 */
+	/** 队伍名（隐藏不显示在玩家名牌上；只用来关掉"队友可见隐形"）。 */
 	private static final String NO_COLLISION_TEAM = "hd_nocollision";
 
 	/**
-	 * 把本局所有参与者放进同一个记分板队伍并把碰撞规则设为 NEVER：
-	 * 原版会据此让他们在客户端与服务端都互不碰撞、互不推挤，
-	 * 从根上消除"人狗重叠出生后松开按键仍被缓慢推开"的漂移。
-	 * 该规则只影响玩家之间，不影响玩家与生物 / 方块。
+	 * 把本局参与者放进同一个记分板队伍，只为了关掉"队友可见隐形"
+	 * （否则客户端把狗本体设为隐身后，队友仍能看到半透明人形）。
+	 *
+	 * <p>碰撞规则必须是 {@code ALWAYS}：原版 {@code EntitySelector.pushableBy()} 里，
+	 * 实体自己队伍的规则为 {@code NEVER} 时"任何人都推不动它"（直接 alwaysFalse），
+	 * 之前设成 NEVER 就是为了防人狗互推，结果连生物都挤不动狗了。
+	 * 现在改为由 {@code LivingEntityPushMixin} 只取消"人↔狗"之间的互推，
+	 * 其他玩家与生物都能正常挤压狗。
 	 */
 	private void ensureNoCollisionTeam() {
 		PlayerTeam team = server.getScoreboard().getPlayerTeam(NO_COLLISION_TEAM);
 		if (team == null) {
 			team = server.getScoreboard().addPlayerTeam(NO_COLLISION_TEAM);
-			team.setCollisionRule(Team.CollisionRule.NEVER);
+		}
+		if (team.getCollisionRule() != Team.CollisionRule.ALWAYS) {
+			team.setCollisionRule(Team.CollisionRule.ALWAYS);
 		}
 		// 队伍默认 seeFriendlyInvisibles=true，而原版 Entity.isInvisibleTo() 的规则是
 		// "同一队伍且队友可见隐形 → 隐形对队友无效"。客户端把狗玩家本体设为隐身后，
@@ -775,7 +1775,8 @@ public class GameSession {
 			d.dogVariant,
 			color.getId(),
 			d.sitting,
-			!d.wolfArmor.isEmpty()
+			!d.wolfArmor.isEmpty(),
+			d.baby
 		));
 	}
 

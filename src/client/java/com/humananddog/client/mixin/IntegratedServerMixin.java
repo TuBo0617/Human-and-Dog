@@ -50,7 +50,9 @@ public class IntegratedServerMixin {
 		GameSession session = GameSessions.get();
 		if (session != null) {
 			GamePhase phase = session.getPhase();
-			if (phase == GamePhase.WAITING_HUMAN || phase == GamePhase.WAITING_DOGS) {
+			if (phase == GamePhase.WAITING_HUMAN
+				|| phase == GamePhase.WAITING_DOGS
+				|| phase == GamePhase.WAITING_PARTNER) {
 				return true;
 			}
 		}

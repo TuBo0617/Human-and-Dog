@@ -5,11 +5,14 @@
 	"mixins": [
 		"ServerPlayerMixin",
 		"ServerGamePacketListenerImplMixin",
-		"CommandsMixin",
 		"MobMixin",
+		"FoodDataMixin",
+		"DogDimensionsMixin",
+		"DogEyeHeightMixin",
+		"FurnaceAccessor",
+		"PlayerSoundMixin",
 		"AbstractSkeletonMixin",
-		"ItemEntityMixin",
-		"LivingEntityPushMixin"
+		"ItemEntityMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

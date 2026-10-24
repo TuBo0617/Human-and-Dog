@@ -1,6 +1,7 @@
 {
-	"key.categories.human-and-dog": "Human and Dog",
-	"key.human-and-dog.dog_camera": "Toggle dog's low camera",
+	"key.category.human-and-dog.keys": "Human and Dog",
+	"key.human-and-dog.bark": "Bark",
+	"key.human-and-dog.take_blocks": "Take blocks off the dog",
 
 	"human-and-dog.screen.role.title": "Choose your role",
 	"human-and-dog.screen.role.hint": "One human, one dog. Everyone else watches.",
@@ -10,6 +11,10 @@
 
 	"human-and-dog.screen.waiting.title": "Waiting for other players…",
 	"human-and-dog.screen.countdown.title": "Respawning…",
+	"human-and-dog.screen.age.title": "Choose your dog's age",
+	"human-and-dog.screen.age.hint": "A puppy can be kept young with a golden dandelion",
+	"human-and-dog.button.puppy": "Puppy",
+	"human-and-dog.button.adult": "Adult dog",
 	"human-and-dog.screen.variant.title": "Choose your dog variant",
 
 	"human-and-dog.variant.woods": "Woods wolf",
@@ -23,5 +28,25 @@
 	"human-and-dog.variant.striped": "Striped wolf",
 
 	"human-and-dog.message.welcome": "Welcome to the game!!!",
-	"human-and-dog.message.spectator": "The human and the dog are ready - you are watching."
+	"human-and-dog.message.block_unsupported": "This block cannot be opened yet: %s",
+	"human-and-dog.message.spectator": "The human and the dog are ready - you are watching.",
+	"human-and-dog.message.take_blocks.not_human": "Only the owner can take blocks off the dog",
+	"human-and-dog.message.take_blocks.no_dog": "No dog of yours within 8 blocks",
+	"human-and-dog.message.take_blocks.empty": "The dog is not carrying any blocks",
+	"human-and-dog.message.take_blocks.done": "Took the blocks off %s",
+	"human-and-dog.message.disc.playing": "Now playing: %s",
+
+	"human-and-dog.role.human": "human",
+	"human-and-dog.role.dog": "dog",
+	"human-and-dog.role.spectator": "spectator",
+	"human-and-dog.role.none": "unassigned",
+
+	"human-and-dog.command.role.success": "Your role is now: %s",
+	"human-and-dog.command.role.taken": "That role is already taken: %s",
+	"human-and-dog.command.role.locked": "The game has already started - roles are locked",
+	"human-and-dog.command.role.invalid": "Unknown role: %s (use human / dog / spectator)",
+	"human-and-dog.command.age.only_dog": "Only the dog can use this command",
+	"human-and-dog.command.age.ok": "Pick a puppy or an adult, then pick a variant",
+	"human-and-dog.command.swap.need_both": "Both the human and the dog must be online",
+	"human-and-dog.command.swap.done": "Swapped the human and the dog"
 }

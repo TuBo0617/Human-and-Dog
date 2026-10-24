@@ -1,6 +1,7 @@
 {
-	"key.categories.human-and-dog": "人狗同行",
-	"key.human-and-dog.dog_camera": "切换狗的低视角",
+	"key.category.human-and-dog.keys": "人狗同行",
+	"key.human-and-dog.bark": "狗叫",
+	"key.human-and-dog.take_blocks": "取出狗身上的挂件",
 
 	"human-and-dog.screen.role.title": "选择你的角色",
 	"human-and-dog.screen.role.hint": "人、狗各一名，其余玩家自动观战",
@@ -10,6 +11,10 @@
 
 	"human-and-dog.screen.waiting.title": "等待其他玩家加入并准备…",
 	"human-and-dog.screen.countdown.title": "即将重生…",
+	"human-and-dog.screen.age.title": "选择狗的年龄",
+	"human-and-dog.screen.age.hint": "小狗可以用金蒲公英锁住年龄，永远保持幼犬",
+	"human-and-dog.button.puppy": "小狗",
+	"human-and-dog.button.adult": "成年狗",
 	"human-and-dog.screen.variant.title": "选择狗的类型",
 
 	"human-and-dog.variant.woods": "丛林狗",
@@ -23,5 +28,25 @@
 	"human-and-dog.variant.striped": "条纹狗",
 
 	"human-and-dog.message.welcome": "欢迎游玩！！！",
-	"human-and-dog.message.spectator": "人狗已就位，你以观战者身份加入。"
+	"human-and-dog.message.block_unsupported": "这个方块暂时还不能打开：%s",
+	"human-and-dog.message.spectator": "人狗已就位，你以观战者身份加入。",
+	"human-and-dog.message.take_blocks.not_human": "只有主人可以取下狗身上的挂件",
+	"human-and-dog.message.take_blocks.no_dog": "附近没有你的狗（8 格内）",
+	"human-and-dog.message.take_blocks.empty": "狗身上没有挂件",
+	"human-and-dog.message.take_blocks.done": "已取下 %s 身上的挂件",
+	"human-and-dog.message.disc.playing": "正在播放：%s",
+
+	"human-and-dog.role.human": "人",
+	"human-and-dog.role.dog": "狗",
+	"human-and-dog.role.spectator": "观战者",
+	"human-and-dog.role.none": "未选择",
+
+	"human-and-dog.command.role.success": "身份已切换为：%s",
+	"human-and-dog.command.role.taken": "这个身份已经有人了：%s",
+	"human-and-dog.command.role.locked": "游戏已经开始，不能再切换身份",
+	"human-and-dog.command.role.invalid": "未知身份：%s（可用 human / dog / spectator）",
+	"human-and-dog.command.age.only_dog": "只有狗可以使用这个指令",
+	"human-and-dog.command.age.ok": "请选择小狗或成年狗，然后再选择狗的类型",
+	"human-and-dog.command.swap.need_both": "需要人和狗同时在线才能互换身份",
+	"human-and-dog.command.swap.done": "已互换人与狗的身份"
 }

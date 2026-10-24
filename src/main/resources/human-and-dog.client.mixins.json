@@ -4,15 +4,14 @@
 	"compatibilityLevel": "JAVA_25",
 		"client": [
 			"BondClampMixin",
-			"ClientLivingEntityPushMixin",
-			"ClientPlayerPickableMixin",
-			"DogEyeHeightMixin",
+			"DogNameTagMixin",
+			"DogRenderStateMixin",
+			"DogSitInputMixin",
+			"DogSprintMixin",
 			"GameRendererMixin",
 			"HudMixin",
 			"IntegratedServerMixin",
-			"KeyboardHandlerMixin",
 			"LevelExtractorMixin",
-			"MinecraftMixin",
 			"MultiPlayerGameModeMixin"
 		],
 	"injectors": {

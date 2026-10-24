@@ -1,6 +1,6 @@
 package com.humananddog;
 
-import com.humananddog.command.ModeCommand;
+import com.humananddog.command.HdCommand;
 import com.humananddog.mechanic.DeathMechanic;
 import com.humananddog.mechanic.DimensionMechanic;
 import com.humananddog.mechanic.DogMechanic;
@@ -28,8 +28,8 @@ public class HumanAndDogMod implements ModInitializer {
 		ModNetworking.registerCommon();
 		ModNetworking.registerServerReceivers();
 
-		// 唯一允许的命令 /mode
-		ModeCommand.registerCallback();
+		// 唯一指令根：/hd role|age|swap
+		HdCommand.registerCallback();
 
 		// 狗的属性、限制与交互
 		DogMechanic.register();
@@ -51,6 +51,16 @@ public class HumanAndDogMod implements ModInitializer {
 				server.getWorldData().setAllowCommands(true);
 				GameSession session = GameSessions.require(server);
 				session.onJoin(handler.getPlayer());
+			})
+		);
+
+		// 玩家离开：参与者掉线时暂停世界，等他回来再继续
+		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) ->
+			server.execute(() -> {
+				GameSession session = GameSessions.get();
+				if (session != null) {
+					session.onLeave(handler.getPlayer());
+				}
 			})
 		);
 

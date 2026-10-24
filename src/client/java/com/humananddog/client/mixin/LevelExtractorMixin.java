@@ -27,7 +27,6 @@ public abstract class LevelExtractorMixin {
 	) {
 		Minecraft mc = Minecraft.getInstance();
 		if (ClientState.localPlayerIsDog()
-			&& ClientState.dogLowCamera
 			&& mc.options.getCameraType().isFirstPerson()
 			&& state.avatarRenderState != null) {
 			state.avatarRenderState.isInvisible = false;
